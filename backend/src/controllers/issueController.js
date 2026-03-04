@@ -1,4 +1,45 @@
 const Issue = require('../models/Issue');
+const User = require('../models/User');
+const classifier = require('../ai/classificationService');
+
+// ─── Voice Coin amounts ───────────────────────────────────────────────────────
+const COIN_REWARDS = {
+  new: 50,   // initial submission
+  approved: 100,
+  rejected: 20,
+  resolved: 150,
+  in_progress: 10,
+  acknowledged: 10
+};
+
+// Helper: award/update coins on user
+async function awardCoins(userId, issue, newStatus) {
+  if (!userId) return;
+  const reward = COIN_REWARDS[newStatus];
+  if (!reward) return;
+  try {
+    // Only award if transition hasn't given coins for this status yet
+    const alreadyRewarded = issue.notifications?.some(
+      n => n.type === 'in_app' && n.message && n.message.includes(`coins:${newStatus}`)
+    );
+    if (alreadyRewarded) return;
+
+    await User.findByIdAndUpdate(userId, { $inc: { voiceCoins: reward } });
+
+    // Mark reward given
+    issue.notifications = issue.notifications || [];
+    issue.notifications.push({
+      type: 'in_app',
+      sentAt: new Date(),
+      status: 'sent',
+      message: `coins:${newStatus}:+${reward}`
+    });
+  } catch (e) {
+    console.error('awardCoins error:', e);
+  }
+}
+
+// ─── Controllers ─────────────────────────────────────────────────────────────
 
 const getPublicIssues = async (req, res) => {
   const issues = await Issue.find({ isPublic: true }).sort({ createdAt: -1 }).limit(100).lean();
@@ -18,17 +59,63 @@ const getIssueStatistics = async (req, res) => {
 };
 
 const createIssue = async (req, res) => {
-  const userId = (req.user?._id || req.user?.id) || null;
-  const { title, description, category, latitude, longitude, address, priority } = req.body;
-  if (!title || !description || !category || !latitude || !longitude) return res.status(400).json({ message: 'Missing fields' });
-  const issue = await Issue.create({
-    title, description, category, priority: priority || 'medium',
-    location: { type: 'Point', coordinates: [Number(longitude), Number(latitude)], address },
-    reportedBy: userId
-  });
-  // Realtime notify
-  req.app.get('io').emit('issue:new', { id: issue._id, title: issue.title, category: issue.category, status: issue.status });
-  return res.status(201).json({ id: issue._id });
+  try {
+    const userId = (req.user?._id || req.user?.id) || null;
+    const { title, description, category, latitude, longitude, address, imageBase64 } = req.body;
+    if (!title || !description || !category || !latitude || !longitude) {
+      return res.status(400).json({ message: 'Missing fields' });
+    }
+
+    let imageBuffer = null;
+    if (imageBase64) {
+      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+      imageBuffer = Buffer.from(base64Data, 'base64');
+    }
+
+    const ai = await classifier.classify(
+      imageBuffer, title, description, category,
+      Number(longitude), Number(latitude)
+    );
+
+    const issue = await Issue.create({
+      title, description, category,
+      priority: ai.priority,
+      location: { type: 'Point', coordinates: [Number(longitude), Number(latitude)], address },
+      reportedBy: userId,
+      aiClassification: {
+        category,
+        confidence: ai.severity / 10,
+        suggestedPriority: ai.priority,
+        processedAt: new Date()
+      }
+    });
+
+    // Award 50 coins for submitting
+    if (userId) {
+      await User.findByIdAndUpdate(userId, {
+        $inc: { voiceCoins: COIN_REWARDS.new, 'statistics.totalReports': 1 }
+      });
+      issue.notifications = [{ type: 'in_app', sentAt: new Date(), status: 'sent', message: `coins:new:+${COIN_REWARDS.new}` }];
+      await issue.save();
+    }
+
+    req.app.get('io').emit('issue:new', {
+      id: issue._id, title: issue.title, category: issue.category,
+      status: issue.status, priority: issue.priority
+    });
+
+    return res.status(201).json({
+      id: issue._id,
+      priority: ai.priority,
+      severity: ai.severity,
+      duplicateCount: ai.duplicateCount,
+      aiReason: ai.aiReason,
+      coinsAwarded: COIN_REWARDS.new
+    });
+  } catch (err) {
+    console.error('Create issue error:', err);
+    return res.status(500).json({ message: 'Failed to create issue' });
+  }
 };
 
 const getMyIssues = async (req, res) => {
@@ -38,7 +125,13 @@ const getMyIssues = async (req, res) => {
 };
 
 const getIssueById = async (req, res) => {
-  return res.status(200).json({ id: req.params.id, issue: null });
+  try {
+    const issue = await Issue.findById(req.params.id).lean();
+    if (!issue) return res.status(404).json({ message: 'Issue not found' });
+    return res.status(200).json({ issue });
+  } catch {
+    return res.status(404).json({ message: 'Issue not found' });
+  }
 };
 
 const updateIssue = async (req, res) => {
@@ -61,13 +154,71 @@ const submitFeedback = async (req, res) => {
   return res.status(201).json({ id: req.params.id, message: 'Feedback submitted (stub)' });
 };
 
+// Award coins when admin changes status
 const updateIssueStatus = async (req, res) => {
-  const { status } = req.body;
-  const issue = await Issue.findByIdAndUpdate(req.params.id, { status }, { new: true });
-  if (!issue) return res.status(404).json({ message: 'Issue not found' });
-  if (issue.reportedBy) req.app.get('io').to(`user-${issue.reportedBy}`).emit('issue:status', { id: issue._id, status: issue.status });
-  req.app.get('io').emit('issue:updated', { id: issue._id, status: issue.status });
-  return res.status(200).json({ id: issue._id, status: issue.status });
+  try {
+    const { status } = req.body;
+    const issue = await Issue.findById(req.params.id);
+    if (!issue) return res.status(404).json({ message: 'Issue not found' });
+
+    const prevStatus = issue.status;
+    issue.status = status;
+
+    // Award coins to reporter
+    if (issue.reportedBy && prevStatus !== status) {
+      await awardCoins(issue.reportedBy, issue, status);
+      // Also update resolved count in stats
+      if (status === 'resolved' || status === 'closed') {
+        await User.findByIdAndUpdate(issue.reportedBy, {
+          $inc: { 'statistics.resolvedReports': 1 }
+        });
+      }
+    }
+
+    await issue.save();
+
+    // Realtime to user
+    if (issue.reportedBy) {
+      req.app.get('io').to(`user-${issue.reportedBy}`).emit('issue:status', {
+        id: issue._id, status: issue.status,
+        coinsAwarded: COIN_REWARDS[status] || 0
+      });
+    }
+    // Realtime to all admins
+    req.app.get('io').emit('issue:updated', { id: issue._id, status: issue.status });
+
+    return res.status(200).json({ id: issue._id, status: issue.status, coinsAwarded: COIN_REWARDS[status] || 0 });
+  } catch (err) {
+    console.error('updateIssueStatus error:', err);
+    return res.status(500).json({ message: 'Failed to update status' });
+  }
+};
+
+// Reminder from citizen → pushes to admin notification panel via Socket.io
+const sendReminder = async (req, res) => {
+  try {
+    const issue = await Issue.findById(req.params.id).lean();
+    if (!issue) return res.status(404).json({ message: 'Issue not found' });
+
+    const userName = req.user?.name || 'A citizen';
+
+    // Emit to admin panel via socket (admin listens on 'admin:reminder')
+    req.app.get('io').emit('admin:reminder', {
+      id: issue._id,
+      title: issue.title,
+      category: issue.category,
+      status: issue.status,
+      priority: issue.priority,
+      reportedBy: userName,
+      message: `${userName} sent a reminder for "${issue.title}" — please review this issue.`,
+      sentAt: new Date().toISOString()
+    });
+
+    return res.status(200).json({ message: 'Reminder sent to admin.' });
+  } catch (err) {
+    console.error('sendReminder error:', err);
+    return res.status(500).json({ message: 'Failed to send reminder' });
+  }
 };
 
 const assignIssue = async (req, res) => {
@@ -103,27 +254,10 @@ const batchUpdateStatus = async (req, res) => {
 };
 
 module.exports = {
-  getPublicIssues,
-  getPublicIssueById,
-  getNearbyIssues,
-  getIssueStatistics,
-  createIssue,
-  getMyIssues,
-  getIssueById,
-  updateIssue,
-  deleteIssue,
-  addComment,
-  toggleUpvote,
-  submitFeedback,
-  updateIssueStatus,
-  assignIssue,
-  updatePriority,
-  resolveIssue,
-  getCategoryDistribution,
-  getResolutionTimeStats,
-  getIssueHeatmap,
-  batchClassifyIssues,
-  batchUpdateStatus,
+  getPublicIssues, getPublicIssueById, getNearbyIssues, getIssueStatistics,
+  createIssue, getMyIssues, getIssueById, updateIssue, deleteIssue,
+  addComment, toggleUpvote, submitFeedback, updateIssueStatus, sendReminder,
+  assignIssue, updatePriority, resolveIssue,
+  getCategoryDistribution, getResolutionTimeStats, getIssueHeatmap,
+  batchClassifyIssues, batchUpdateStatus
 };
-
-

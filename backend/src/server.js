@@ -39,6 +39,10 @@ const io = new Server(httpServer, {
 // Connect to MongoDB
 connectDB();
 
+// Initialize AI classifier
+const classifier = require('./ai/classificationService');
+classifier.initialize();
+
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -67,7 +71,8 @@ app.use(helmet({
         "'self'",
         "'unsafe-inline'",
         "https://cdn.tailwindcss.com",
-        "https://fonts.googleapis.com"
+        "https://fonts.googleapis.com",
+        "https://fonts.gstatic.com"
       ],
       imgSrc: [
         "'self'",
@@ -85,7 +90,8 @@ app.use(helmet({
       fontSrc: [
         "'self'",
         "data:",
-        "https://fonts.gstatic.com"
+        "https://fonts.gstatic.com",
+        "https://fonts.googleapis.com"
       ],
       frameSrc: ["'self'"],
       workerSrc: ["'self'", "blob:"]

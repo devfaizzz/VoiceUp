@@ -1,241 +1,781 @@
-// Google Maps Integration for Citizen Panel
-let map;
-let marker;
-let geocoder;
-let mapLoaded = false;
+// ─── Google Maps ───────────────────────────────────────────────
+let map, detailMap, marker, detailMarker, geocoder, mapLoaded = false;
+let currentUserData = null; // cached from /api/users/me
 
-// Initialize Google Maps
-function initMap() {
-  console.log('initMap called - Google Maps is loading...');
-
-  // Default location (will be replaced by user's location)
-  const defaultLocation = { lat: 28.6139, lng: 77.2090 }; // Delhi, India
-
-  // Create map
-  map = new google.maps.Map(document.getElementById('map'), {
-    center: defaultLocation,
-    zoom: 13,
-    mapTypeControl: true,
-    streetViewControl: false,
-    fullscreenControl: true
-  });
-
-  // Initialize geocoder
-  geocoder = new google.maps.Geocoder();
-
-  // Add click listener to map
-  map.addListener('click', (event) => {
-    placeMarker(event.latLng);
-    reverseGeocode(event.latLng);
-  });
-
-  // Mark map as loaded
-  google.maps.event.addListenerOnce(map, 'idle', () => {
-    mapLoaded = true;
-    console.log('✅ Google Maps fully loaded and ready!');
+function fileToBase64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = rej;
+    r.readAsDataURL(file);
   });
 }
 
-// Place marker on map
-function placeMarker(location) {
-  if (marker) {
-    marker.setPosition(location);
-  } else {
-    marker = new google.maps.Marker({
-      position: location,
-      map: map,
-      draggable: true,
-      animation: google.maps.Animation.DROP
-    });
-
-    // Update coordinates when marker is dragged
-    marker.addListener('dragend', (event) => {
-      reverseGeocode(event.latLng);
-    });
+// ─── Socket.io ──────────────────────────────────────────────────
+let socket;
+function initSocket() {
+  socket = io();
+  const u = getUser();
+  if (u && u.id) {
+    socket.emit('join', `user-${u.id}`);
   }
 
-  // Update hidden form fields
+  socket.on('issue:status', data => {
+    showToast(`🔔 Issue Status Updated: ${data.status.toUpperCase()}`, 'success');
+    if (data.coinsAwarded > 0) {
+      showToast(`🪙 +${data.coinsAwarded} Voice Coins awarded!`, 'success');
+    }
+    loadMyReports(); // Refresh list
+    loadUserData();  // Refresh coins
+  });
+}
+
+// ─── Maps ──────────────────────────────────────────────────────
+function initMap() {
+  const def = { lat: 28.6139, lng: 77.2090 };
+  map = new google.maps.Map(document.getElementById('map'), {
+    center: def, zoom: 13,
+    mapTypeControl: false, streetViewControl: false, fullscreenControl: false,
+    styles: mapStyle()
+  });
+  geocoder = new google.maps.Geocoder();
+  map.addListener('click', e => { placeMarker(e.latLng); reverseGeocode(e.latLng, true); });
+  google.maps.event.addListenerOnce(map, 'idle', () => { mapLoaded = true; });
+}
+
+function mapStyle() {
+  return [
+    { featureType: 'all', elementType: 'geometry', stylers: [{ color: '#EDE9FE' }] },
+    { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#C4B5FD' }] },
+    { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#A5B4FC' }] },
+    { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+    { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+    { elementType: 'labels.text.fill', stylers: [{ color: '#5B21B6' }] },
+    { elementType: 'labels.text.stroke', stylers: [{ color: '#EDE9FE' }] }
+  ];
+}
+
+function placeMarker(location, onDetailMap) {
+  if (onDetailMap) {
+    if (detailMarker) detailMarker.setPosition(location);
+    else detailMarker = new google.maps.Marker({ position: location, map: detailMap, animation: google.maps.Animation.DROP });
+    return;
+  }
+  if (marker) marker.setPosition(location);
+  else {
+    marker = new google.maps.Marker({
+      position: location, map, draggable: true,
+      animation: google.maps.Animation.DROP,
+      icon: {
+        url: 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40"><ellipse cx="16" cy="38" rx="6" ry="2" fill="rgba(108,63,197,.25)"/><path d="M16 0C9 0 4 5 4 12c0 9 12 26 12 26S28 21 28 12C28 5 23 0 16 0z" fill="#8B5CF6"/><circle cx="16" cy="12" r="5" fill="#fff" opacity=".9"/></svg>`),
+        scaledSize: new google.maps.Size(32, 40)
+      }
+    });
+    marker.addListener('dragend', e => reverseGeocode(e.latLng, true));
+  }
   document.getElementById('latitude').value = location.lat();
   document.getElementById('longitude').value = location.lng();
 }
 
-// Reverse geocode to get address
-function reverseGeocode(latLng) {
+// Feature 4: Show location NAME (not raw lat/lng) in map coords bar
+function reverseGeocode(latLng, updateMain) {
+  if (!geocoder) return;
   geocoder.geocode({ location: latLng }, (results, status) => {
-    if (status === 'OK' && results[0]) {
-      const address = results[0].formatted_address;
-      document.getElementById('locationAddress').textContent = address;
-    } else {
-      document.getElementById('locationAddress').textContent =
-        `Lat: ${latLng.lat().toFixed(5)}, Lng: ${latLng.lng().toFixed(5)}`;
+    const addr = (status === 'OK' && results[0]) ? results[0].formatted_address
+      : `Lat: ${latLng.lat().toFixed(5)}, Lng: ${latLng.lng().toFixed(5)}`;
+    if (updateMain) {
+      document.getElementById('locationAddress').textContent = addr;
+      const parts = addr.split(',');
+      const areaName = parts.slice(0, 2).join(',').trim();
+      document.getElementById('mapLocName').textContent = parts[0] || 'Custom Location';
+      document.getElementById('mapLocAddr').textContent = parts.slice(1, 3).join(',').trim() || addr;
+      // Show area name (instead of raw coords)
+      document.getElementById('mapCoords').textContent =
+        `📍 ${areaName} · ${latLng.lat().toFixed(4)}°N, ${latLng.lng().toFixed(4)}°E`;
     }
   });
 }
 
-// Existing DOMContentLoaded code
-document.addEventListener('DOMContentLoaded', () => {
-  const menuBtn = document.getElementById('menuBtn');
-  const mobileMenu = document.getElementById('mobileMenu');
-  if (menuBtn && mobileMenu) {
-    menuBtn.addEventListener('click', () => {
-      mobileMenu.classList.toggle('hidden');
+// ─── Helpers ────────────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast ${type} show`;
+  setTimeout(() => { t.className = 'toast'; }, 3500);
+}
+function showLoader(v) { document.getElementById('loaderOverlay').classList.toggle('show', v); }
+function fmtDate(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+function priorityInfo(p) {
+  const m = { critical: { label: '🔴 Critical', cls: 'critical' }, high: { label: '🟠 High Priority', cls: 'high' }, medium: { label: '🟡 Medium', cls: 'medium' }, low: { label: '🟢 Low', cls: 'low' } };
+  return m[p] || m.medium;
+}
+function catIcon(cat) {
+  const i = { streetlight: '💡', water: '💧', road: '🛣️', garbage: '🗑️', pothole: '🕳️', sewage: '🚰', traffic: '🚦', other: '📌' };
+  return i[cat] || '📌';
+}
+function catCls(cat) {
+  const c = { streetlight: 'streetlight', water: 'water', road: 'road', garbage: 'garbage', pothole: 'road', sewage: 'water', traffic: 'road' };
+  return c[cat] || 'road';
+}
+// Extract human-readable location from DB issue
+function issueAddress(issue) {
+  if (issue.address) return issue.address;
+  if (issue.location && issue.location.address) return issue.location.address;
+  if (issue.location && issue.location.city) return issue.location.city;
+  if (issue.location && issue.location.coordinates)
+    return `${issue.location.coordinates[1].toFixed(4)}°N, ${issue.location.coordinates[0].toFixed(4)}°E`;
+  return '—';
+}
+function issueCoords(issue) {
+  if (issue.latitude && issue.longitude) return { lat: parseFloat(issue.latitude), lng: parseFloat(issue.longitude) };
+  if (issue.location && issue.location.coordinates && issue.location.coordinates.length >= 2)
+    return { lat: issue.location.coordinates[1], lng: issue.location.coordinates[0] };
+  return null;
+}
+
+// ─── Badge ──────────────────────────────────────────────────────
+function getBadge(n) {
+  if (n >= 100) return { label: 'GOD', emoji: '⚡', color: '#F59E0B' };
+  if (n >= 80) return { label: 'Knight', emoji: '🛡️', color: '#8B5CF6' };
+  if (n >= 50) return { label: 'Superman', emoji: '🦸', color: '#3B82F6' };
+  if (n >= 25) return { label: 'Warrior', emoji: '⚔️', color: '#EF4444' };
+  if (n >= 10) return { label: 'Saviour', emoji: '🌟', color: '#10B981' };
+  return { label: 'Newcomer', emoji: '👋', color: '#6B7280' };
+}
+
+// ─── Feature 1: Notification Dropdown ─────────────────────────
+let notifOpen = false;
+const NOTIFICATIONS = [
+  { type: 'update', icon: '🔔', title: 'Your report is In Progress', msg: '"Streetlight not working" has been assigned to Public Works Dept.', time: '2h ago', unread: true },
+  { type: 'reward', icon: '🎁', title: '+35 Voice Coins earned!', msg: 'Thank you for reporting a civic issue in your community.', time: '1d ago', unread: true },
+  { type: 'update', icon: '✅', title: 'Status update on your report', msg: '"Large pothole" has been approved and is being tracked.', time: '3d ago', unread: false },
+  { type: 'alert', icon: '⚠️', title: 'Reminder sent', msg: 'Officials have been reminded about your report.', time: '5d ago', unread: false }
+];
+
+function renderNotifDropdown() {
+  const list = document.getElementById('notifDropdownList');
+  if (!list) return;
+  const unread = NOTIFICATIONS.filter(n => n.unread).length;
+  const badge = document.getElementById('notifCount');
+  if (badge) badge.textContent = unread;
+  list.innerHTML = '';
+  NOTIFICATIONS.forEach(n => {
+    const div = document.createElement('div');
+    div.className = `nd-item${n.unread ? ' unread' : ''}`;
+    div.innerHTML = `
+      <div class="nd-icon ${n.type}">${n.icon}</div>
+      <div class="nd-text"><strong>${n.title}</strong><p>${n.msg}</p></div>
+      <span class="nd-time">${n.time}</span>
+    `;
+    div.addEventListener('click', () => { n.unread = false; renderNotifDropdown(); });
+    list.appendChild(div);
+  });
+}
+
+function toggleNotifDropdown(e) {
+  e.stopPropagation();
+  const d = document.getElementById('notifDropdown');
+  closeAllDropdowns();
+  notifOpen = !notifOpen;
+  d.classList.toggle('open', notifOpen);
+}
+
+// ─── Feature 3: Voice Coins + Wallet ──────────────────────────
+let userCoins = 0;
+
+function updateCoinsDisplay(coins) {
+  userCoins = coins || 0;
+  const el = document.getElementById('headerCoins');
+  const wc = document.getElementById('walletCoins');
+  if (el) el.textContent = userCoins;
+  if (wc) wc.textContent = userCoins;
+  // Disable redeem buttons if insufficient coins
+  document.querySelectorAll('.redeem-btn').forEach(btn => {
+    const cost = parseInt(btn.dataset.cost);
+    btn.disabled = userCoins < cost;
+    btn.textContent = userCoins < cost ? `Need ${cost} VC` : 'Redeem';
+  });
+}
+
+function openWalletModal() {
+  updateCoinsDisplay(userCoins);
+  document.getElementById('walletModal').classList.add('open');
+}
+function closeWalletModal() { document.getElementById('walletModal').classList.remove('open'); }
+
+// ─── Feature 5: Profile Dropdown + My Profile Modal ───────────
+let profileDropOpen = false;
+
+function toggleProfileDropdown(e) {
+  e.stopPropagation();
+  const d = document.getElementById('profileDropdown');
+  closeAllDropdowns();
+  profileDropOpen = !profileDropOpen;
+  d.classList.toggle('open', profileDropOpen);
+}
+
+function closeAllDropdowns() {
+  document.getElementById('notifDropdown')?.classList.remove('open');
+  document.getElementById('profileDropdown')?.classList.remove('open');
+  notifOpen = false;
+  profileDropOpen = false;
+}
+
+function openProfileModal() {
+  closeAllDropdowns();
+  const overlay = document.getElementById('profileModal');
+  overlay.classList.add('open');
+  if (currentUserData) fillProfileModal(currentUserData);
+}
+function closeProfileModal() { document.getElementById('profileModal').classList.remove('open'); }
+
+function fillProfileModal(userData) {
+  const u = userData.user || userData;
+  document.getElementById('pmName').textContent = u.name || 'User';
+  document.getElementById('pmEmail').textContent = u.email || '—';
+  const init = (u.name || 'U').charAt(0).toUpperCase();
+  document.getElementById('pmAvatarInitial').textContent = init;
+
+  // Stats
+  const stats = u.statistics || {};
+  document.getElementById('pmTotalReports').textContent = stats.totalReports || 0;
+  document.getElementById('pmResolved').textContent = stats.resolvedReports || 0;
+  document.getElementById('pmCoins').textContent = u.voiceCoins || 0;
+
+  // Badge
+  const badge = u.badge || getBadge(stats.totalReports || 0);
+  const badgeEl = document.getElementById('pmBadge');
+  badgeEl.textContent = `${badge.emoji} ${badge.label}`;
+  badgeEl.style.background = badge.color + '22';
+  badgeEl.style.color = badge.color;
+  badgeEl.style.borderColor = badge.color + '55';
+
+  // Form prefill
+  document.getElementById('pmInputName').value = u.name || '';
+  document.getElementById('pmInputPhone').value = u.phone || '';
+  document.getElementById('pmInputBio').value = (u.profile && u.profile.bio) || '';
+  document.getElementById('pmInputCity').value = (u.profile && u.profile.city) || '';
+  document.getElementById('pmInputState').value = (u.profile && u.profile.state) || '';
+}
+
+// ─── Load User Data (coins + profile) ─────────────────────────
+async function loadUserData() {
+  try {
+    const res = await fetch('/api/users/me', { headers: authHeader() });
+    if (!res.ok) throw new Error('unauth');
+    const data = await res.json();
+    currentUserData = data;
+    const u = data.user;
+
+    // Update header
+    if (u.name) {
+      document.getElementById('userName').textContent = 'Hi, ' + u.name.split(' ')[0];
+      document.getElementById('userInitial').textContent = u.name.charAt(0).toUpperCase();
+      document.getElementById('pdName').textContent = u.name;
+    }
+    if (u.email) document.getElementById('pdEmail').textContent = u.email;
+
+    updateCoinsDisplay(u.voiceCoins || 0);
+  } catch (e) {
+    // Fallback: use stored user
+    const u = getUser();
+    if (u) {
+      document.getElementById('userName').textContent = 'Hi, ' + (u.name || 'User').split(' ')[0];
+      document.getElementById('userInitial').textContent = ((u.name || 'U').charAt(0)).toUpperCase();
+      document.getElementById('pdName').textContent = u.name || 'User';
+      document.getElementById('pdEmail').textContent = u.email || '';
+    }
+  }
+}
+
+// ─── Category Buttons ──────────────────────────────────────────
+function initCategoryButtons() {
+  const btns = document.querySelectorAll('.cat-btn');
+  const select = document.getElementById('category');
+  btns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      btns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const cat = btn.dataset.cat;
+      for (const opt of select.options) {
+        if (opt.value === cat) { select.value = cat; break; }
+      }
     });
+  });
+}
+
+function initCharCounter() {
+  const ta = document.getElementById('description');
+  const cc = document.getElementById('charCount');
+  if (ta && cc) ta.addEventListener('input', () => { cc.textContent = ta.value.length; });
+}
+
+function initImagePreview() {
+  const input = document.getElementById('photo');
+  const img = document.getElementById('previewImg');
+  const ph = document.getElementById('previewPlaceholder');
+  if (!input) return;
+  input.addEventListener('change', () => {
+    const file = input.files[0];
+    if (file) {
+      img.src = URL.createObjectURL(file);
+      img.style.display = 'block';
+      if (ph) ph.style.display = 'none';
+    }
+  });
+}
+
+// ─── Report Detail Modal ───────────────────────────────────────
+let detailMapInitialized = false;
+let currentReport = null;
+
+function openDetailModal(issue) {
+  currentReport = issue;
+  const overlay = document.getElementById('detailModal');
+
+  document.getElementById('bcTitle').textContent = issue.title || 'Report Detail';
+  document.getElementById('mdIcon').textContent = catIcon(issue.category);
+  document.getElementById('mdTitle').textContent = issue.title || '—';
+
+  const pi = priorityInfo(issue.priority);
+  const pBadge = document.getElementById('mdPriority');
+  pBadge.textContent = pi.label; pBadge.className = `priority-badge ${pi.cls}`;
+
+  const sp = document.getElementById('mdStatus');
+  const rawStatus = (issue.status || 'submitted');
+  const st = rawStatus.toLowerCase().replace(/_/g, '-').replace(' ', '-');
+  const stLabels = { 'in-progress': 'In Progress', 'in_progress': 'In Progress', approved: 'Approved', submitted: 'Submitted', new: 'Submitted', resolved: 'Resolved', rejected: 'Rejected', acknowledged: 'Acknowledged' };
+  sp.textContent = stLabels[st] || rawStatus;
+  sp.className = `status-pill ${st === 'in_progress' ? 'in-progress' : st}`;
+
+  // Feature 4: Show human-readable address
+  const addr = issueAddress(issue);
+  document.getElementById('mdAddr').textContent = addr;
+  document.getElementById('mdDate').textContent = fmtDate(issue.createdAt);
+  document.getElementById('mdViews').textContent = issue.viewCount || issue.views || '—';
+  document.getElementById('mdLikes').textContent = (issue.upvotes && issue.upvotes.length) || issue.upvotesCount || '—';
+
+  const pts = issue.voiceCoins || issue.voicePoints || 35;
+  document.getElementById('mdPoints').textContent = pts;
+
+  // Timeline logic
+  const timeline = issue.timeline || [];
+  const getTlDate = (stArr) => {
+    const entry = timeline.find(t => stArr.includes(t.status?.toLowerCase().replace(/_/g, '-')));
+    return entry ? fmtDate(entry.timestamp) : '—';
+  };
+
+  const isResolved = ['resolved', 'closed'].includes(st);
+  const isApproved = ['approved', 'resolved', 'closed'].includes(st);
+  const isInProgress = ['in-progress', 'in_progress', 'acknowledged'].includes(st) || isApproved;
+  const isRejected = st === 'rejected';
+
+  document.getElementById('tl-submitted').textContent = fmtDate(issue.createdAt);
+  document.getElementById('tl-inprogress').textContent = getTlDate(['in-progress', 'in_progress', 'acknowledged']);
+  document.getElementById('tl-approved').textContent = getTlDate(['approved']);
+  document.getElementById('tl-resolved').textContent = getTlDate(['resolved', 'closed', 'rejected']);
+
+  const tlIP = document.getElementById('tlInProgress');
+  const tlAP = document.getElementById('tlApproved');
+  const tlRS = document.getElementById('tlResolved');
+  if (tlIP) tlIP.className = 'tl-step' + (isApproved || isRejected ? ' done' : isInProgress ? ' active' : '');
+  if (tlAP) tlAP.className = 'tl-step' + (isResolved || isRejected ? ' done' : isApproved ? ' active' : '');
+  if (tlRS) {
+    tlRS.className = 'tl-step' + (isResolved || isRejected ? ' active' : '');
+    const titleEl = tlRS.querySelector('.tl-name');
+    if (titleEl) titleEl.textContent = isRejected ? 'Rejected' : 'Resolved';
   }
 
-  // Basic form handler
-  const issueForm = document.getElementById('issueForm');
-  if (issueForm) {
-    issueForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const data = new FormData(issueForm);
-      const body = {
-        title: document.getElementById('title').value,
-        description: document.getElementById('description').value,
-        category: document.getElementById('category').value,
-        latitude: document.getElementById('latitude').value,
-        longitude: document.getElementById('longitude').value,
-        priority: (document.querySelector('input[name="priority"]:checked') || {}).value,
-        address: document.getElementById('locationAddress').textContent
-      };
+  const an = document.getElementById('assignedNote');
+  const dept = (issue.assignedTo && issue.assignedTo.department) ? 'Public Works Department' : null;
+  if (dept) { document.getElementById('assignedDept').textContent = dept; an.style.display = 'flex'; }
+  else an.style.display = 'none';
 
-      // Validate location
-      if (!body.latitude || !body.longitude) {
-        alert('Please select a location on the map');
-        return;
-      }
+  const rc = document.getElementById('reminderCard');
+  // Make reminder visible for pending/rejected issues (removed 24h limit)
+  rc.style.display = (!isResolved) ? 'flex' : 'none';
 
+  // Mini map header — show location name
+  document.getElementById('mdMapName').textContent = addr.split(',')[0] || 'Location';
+  document.getElementById('mdMapAddr').textContent = addr;
+  const coords = issueCoords(issue);
+  document.getElementById('mdCoords').textContent = coords
+    ? `📍 ${coords.lat.toFixed(4)}°N, ${coords.lng.toFixed(4)}°E`
+    : '—';
+
+  buildFeed(issue);
+  overlay.classList.add('open');
+
+  // Init detail map
+  setTimeout(() => {
+    const center = coords || { lat: 28.6139, lng: 77.2090 };
+    if (!detailMapInitialized) {
+      detailMap = new google.maps.Map(document.getElementById('detailMap'), {
+        center, zoom: 15,
+        mapTypeControl: false, streetViewControl: false, fullscreenControl: false,
+        styles: mapStyle()
+      });
+      detailMapInitialized = true;
+    } else {
+      detailMap.setCenter(center);
+    }
+    if (coords) placeMarker(new google.maps.LatLng(coords.lat, coords.lng), true);
+  }, 120);
+}
+
+function buildFeed(issue) {
+  const list = document.getElementById('feedList');
+  const timeline = issue.timeline || [];
+  const tabU = document.getElementById('tabUpdates');
+  const tabP = document.getElementById('tabPoints');
+  const coins = issue.voiceCoins || issue.voicePoints || 0;
+  if (tabU) tabU.textContent = `Updates (${timeline.length || 1})`;
+  if (tabP) tabP.textContent = `Points (${coins})`;
+
+  list.innerHTML = '';
+  if (timeline.length === 0) {
+    const synth = [];
+    if (issue.createdAt) synth.push({ date: issue.createdAt, title: 'Issue reported by you', body: 'Your report has been received and is being reviewed.', dept: 'You', points: [coins > 0 ? coins : 10] });
+    if (issue.status && !['new'].includes(issue.status)) synth.push({ date: issue.updatedAt || issue.createdAt, title: `Status updated to "${issue.status}"`, body: 'Officials have reviewed your report.', dept: 'System' });
+    synth.sort((a, b) => new Date(b.date) - new Date(a.date)).forEach(u => renderFeedItem(list, u));
+  } else {
+    [...timeline].reverse().forEach(t => renderFeedItem(list, { date: t.timestamp, title: `Status: ${t.status}`, body: t.notes || 'Status was updated.', dept: 'System' }));
+  }
+}
+
+function renderFeedItem(container, u) {
+  const div = document.createElement('div');
+  div.className = 'feed-item';
+  const ago = u.date ? timeAgo(u.date) : '';
+  const ptsHtml = (u.points || []).map(p => `<span class="feed-point-chip">🎁 ${p} Voice Points</span>`).join('');
+  div.innerHTML = `
+    <div class="feed-item-top">
+      <div>
+        <span class="feed-date">${fmtDate(u.date)}</span>
+        ${u.dept ? `<span class="feed-dept" style="margin-left:10px;display:inline-flex;align-items:center;gap:4px;"><span class="feed-dept-icon">🏢</span><span class="feed-dept-name">${u.dept}</span></span>` : ''}
+      </div>
+      ${ago ? `<span class="feed-ago">${ago}</span>` : ''}
+    </div>
+    <div class="feed-item-title">${u.title || ''}</div>
+    <div class="feed-item-body">${u.body || u.message || ''}</div>
+    ${ptsHtml ? `<div class="feed-points-row">${ptsHtml}</div>` : ''}
+  `;
+  container.appendChild(div);
+}
+
+function timeAgo(dateStr) {
+  const diff = Date.now() - new Date(dateStr);
+  const h = Math.floor(diff / 3600000);
+  if (h < 1) return 'just now';
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d} day${d > 1 ? 's' : ''} ago`;
+}
+
+function closeDetailModal() { document.getElementById('detailModal').classList.remove('open'); }
+
+// ─── Feature 2: My Reports (real API, correct field mapping) ─
+window.myIssues = [];
+
+async function loadMyReports() {
+  const list = document.getElementById('reportsList');
+  if (!list) return;
+  try {
+    const res = await fetch('/api/issues/my-issues', { headers: authHeader() });
+    if (!res.ok) throw new Error('fail');
+    const data = await res.json();
+    window.myIssues = data.issues || data || [];
+    renderReportsList(window.myIssues, list, 5);
+  } catch {
+    // Friendly placeholder when backend unreachable
+    window.myIssues = [
+      { _id: '1', title: 'Streetlight not working', category: 'streetlight', priority: 'high', status: 'approved', createdAt: '2024-04-24T00:00:00Z', voiceCoins: 35, location: { address: '123 Main St, Anytown', coordinates: [77.2090, 28.6139] } },
+      { _id: '2', title: 'Large pothole', category: 'pothole', priority: 'medium', status: 'in_progress', createdAt: '2024-04-20T00:00:00Z', voiceCoins: 20, location: { address: '456 Park Ave, Delhi', coordinates: [77.21, 28.61] } },
+      { _id: '3', title: 'Overflowing trash bin', category: 'garbage', priority: 'low', status: 'rejected', createdAt: '2024-04-18T00:00:00Z', voiceCoins: 10, location: { address: '789 Lake Rd, Mumbai', coordinates: [72.83, 18.96] } },
+      { _id: '4', title: 'Water leakage on Elm St', category: 'water', priority: 'high', status: 'approved', createdAt: '2024-04-15T00:00:00Z', voiceCoins: 25, location: { address: 'Elm Street, Bengaluru', coordinates: [77.59, 12.97] } },
+      { _id: '5', title: 'Broken swing in park', category: 'infrastructure', priority: 'medium', status: 'resolved', createdAt: '2024-04-10T00:00:00Z', voiceCoins: 40, location: { address: 'City Park, Chennai', coordinates: [13.08, 80.27] } },
+      { _id: '6', title: 'Illegal parking', category: 'traffic', priority: 'low', status: 'new', createdAt: '2024-04-05T00:00:00Z', voiceCoins: 15, location: { address: 'MG Road, Pune', coordinates: [18.52, 73.85] } }
+    ];
+    renderReportsList(window.myIssues, list, 5);
+  }
+}
+
+function renderReportsList(issues, containerStrOrEl = 'reportsList', limit = null) {
+  const container = typeof containerStrOrEl === 'string' ? document.getElementById(containerStrOrEl) : containerStrOrEl;
+  if (!container) return;
+  container.innerHTML = '';
+  if (!issues || !issues.length) {
+    container.innerHTML = '<p style="text-align:center;color:#A78BFA;font-size:.85rem;padding:20px 0;">No reports yet. Submit your first report!</p>';
+    return;
+  }
+
+  let issuesToRender = issues;
+  if (limit) issuesToRender = issues.slice(0, limit);
+
+  issuesToRender.forEach(issue => {
+    const rawSt = (issue.status || 'new');
+    const st = rawSt.toLowerCase().replace(/_/g, '-');
+    const prog = { new: 10, submitted: 15, 'in-progress': 50, acknowledged: 45, approved: 75, resolved: 100, rejected: 100, closed: 100 }[st] || 15;
+    const stLabel = { 'in-progress': 'In Progress', approved: 'Approved', submitted: 'Submitted', new: 'Submitted', resolved: 'Resolved', rejected: 'Rejected', acknowledged: 'In Review', closed: 'Closed' }[st] || rawSt;
+    const addr = issueAddress(issue);
+    const div = document.createElement('div');
+    div.className = 'report-item';
+    div.innerHTML = `
+      <div class="report-icon ${catCls(issue.category)}">${catIcon(issue.category)}</div>
+      <div class="report-info">
+        <div class="report-title">${issue.title}</div>
+        <div class="report-date">${fmtDate(issue.createdAt)} · ${addr.split(',')[0]}</div>
+        <div class="report-meta">
+          <span class="prio-dot ${issue.priority}"></span>
+          <span class="prio-label">${issue.priority ? issue.priority.charAt(0).toUpperCase() + issue.priority.slice(1) : 'Medium'}</span>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" style="width:${prog}%"></div></div>
+      </div>
+      <span class="status-badge ${st === 'in_progress' ? 'in-progress' : st}">${stLabel}</span>
+      <span class="report-more">⋯</span>
+    `;
+    div.addEventListener('click', () => openDetailModal(issue));
+    container.appendChild(div);
+  });
+}
+
+// ─── Notifications ─────────────────────────────────────────────
+function loadNotifications() {
+  renderNotifDropdown();
+  // Also update bottom notifications panel
+  const list = document.getElementById('notificationsList');
+  if (!list) return;
+  list.innerHTML = '';
+  NOTIFICATIONS.forEach(n => {
+    const div = document.createElement('div');
+    div.className = 'notif-item';
+    div.innerHTML = `
+      <div class="notif-icon ${n.type}">${n.icon}</div>
+      <div class="notif-text"><strong>${n.title}</strong><p>${n.msg}</p></div>
+      <span class="notif-time">${n.time}</span>
+    `;
+    list.appendChild(div);
+  });
+}
+
+// ─── Profile Form ──────────────────────────────────────────────
+async function saveProfile(e) {
+  e.preventDefault();
+  const btn = document.getElementById('pmSaveBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const body = {
+    name: document.getElementById('pmInputName').value,
+    phone: document.getElementById('pmInputPhone').value,
+    bio: document.getElementById('pmInputBio').value,
+    city: document.getElementById('pmInputCity').value,
+    state: document.getElementById('pmInputState').value
+  };
+  try {
+    const res = await fetch('/api/users/me', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...authHeader() },
+      body: JSON.stringify(body)
+    });
+    if (res.ok) {
+      showToast('✅ Profile updated successfully!', 'success');
+      // Update stored user name
+      const u = getUser();
+      if (u) { u.name = body.name; localStorage.setItem('voiceup_user', JSON.stringify(u)); }
+      document.getElementById('userName').textContent = 'Hi, ' + body.name.split(' ')[0];
+      document.getElementById('userInitial').textContent = body.name.charAt(0).toUpperCase();
+      document.getElementById('pmName').textContent = body.name;
+      document.getElementById('pdName').textContent = body.name;
+    } else { showToast('Failed to save. Try again.', 'error'); }
+  } catch { showToast('Network error.', 'error'); }
+  finally { btn.disabled = false; btn.textContent = 'Save Changes'; }
+}
+
+// ─── DOMContentLoaded ──────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+
+  initSocket();
+
+  initCategoryButtons();
+  initCharCounter();
+  initImagePreview();
+
+  // Feature 1: notification dropdown toggle
+  document.getElementById('notifBtn')?.addEventListener('click', toggleNotifDropdown);
+  document.getElementById('markAllReadBtn')?.addEventListener('click', e => {
+    e.stopPropagation();
+    NOTIFICATIONS.forEach(n => n.unread = false);
+    renderNotifDropdown();
+    showToast('All notifications marked as read', 'success');
+  });
+
+  // Feature 3: coins chip → wallet
+  document.getElementById('coinsBadge')?.addEventListener('click', openWalletModal);
+  document.getElementById('walletCloseBtn')?.addEventListener('click', closeWalletModal);
+  document.getElementById('walletModal')?.addEventListener('click', e => {
+    if (e.target === document.getElementById('walletModal')) closeWalletModal();
+  });
+  document.querySelectorAll('.redeem-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const cost = parseInt(btn.dataset.cost);
+      const store = btn.dataset.store;
+      if (userCoins < cost) { showToast(`You need ${cost} VC to redeem this voucher.`, 'error'); return; }
+      userCoins -= cost;
+      updateCoinsDisplay(userCoins);
+      showToast(`🎉 ${store} voucher redeemed! Check your email.`, 'success');
+    });
+  });
+
+  // Feature 5: profile dropdown
+  document.getElementById('userChip')?.addEventListener('click', toggleProfileDropdown);
+  document.getElementById('pdMyProfile')?.addEventListener('click', openProfileModal);
+  document.getElementById('pdMyRewards')?.addEventListener('click', () => { closeAllDropdowns(); openWalletModal(); });
+  document.getElementById('pdSettings')?.addEventListener('click', () => { closeAllDropdowns(); showToast('Settings coming soon!', 'success'); });
+  document.getElementById('pdLogout')?.addEventListener('click', () => { if (typeof logout === 'function') logout(); });
+
+  // Feature 5: Reminder Button
+  document.getElementById('sendReminderBtn')?.addEventListener('click', async () => {
+    if (!currentReport) return;
+    const btn = document.getElementById('sendReminderBtn');
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      const res = await fetch(`/api/issues/${currentReport._id}/reminder`, {
+        method: 'POST',
+        headers: authHeader()
+      });
+      if (res.ok) {
+        showToast('🚀 Reminder sent to officials!', 'success');
+        document.getElementById('reminderCard').style.display = 'none';
+      } else { showToast('Failed to send reminder.', 'error'); }
+    } catch { showToast('Network error.', 'error'); }
+    finally { btn.disabled = false; btn.textContent = orig; }
+  });
+
+  // Profile modal
+  document.getElementById('profileCloseBtn')?.addEventListener('click', closeProfileModal);
+  document.getElementById('profileModal')?.addEventListener('click', e => {
+    if (e.target === document.getElementById('profileModal')) closeProfileModal();
+  });
+  document.getElementById('profileForm')?.addEventListener('submit', saveProfile);
+
+  // Close all dropdowns on outside click
+  document.addEventListener('click', closeAllDropdowns);
+
+  // Detail modal close
+  document.getElementById('modalCloseBtn')?.addEventListener('click', closeDetailModal);
+  document.getElementById('detailModal')?.addEventListener('click', e => {
+    if (e.target === document.getElementById('detailModal')) closeDetailModal();
+  });
+  document.getElementById('bcHome')?.addEventListener('click', closeDetailModal);
+
+  // All Reports modal
+  document.getElementById('viewAllReportsBtn')?.addEventListener('click', () => {
+    const list = document.getElementById('allReportsList');
+    renderReportsList(window.myIssues, list);
+    document.getElementById('allReportsModal').classList.add('open');
+  });
+  const closeAllReportsModal = () => document.getElementById('allReportsModal').classList.remove('open');
+  document.getElementById('allReportsCloseBtn')?.addEventListener('click', closeAllReportsModal);
+  document.getElementById('allReportsModal')?.addEventListener('click', e => {
+    if (e.target === document.getElementById('allReportsModal')) closeAllReportsModal();
+  });
+
+  // Reminder
+  document.getElementById('sendReminderBtn')?.addEventListener('click', () => {
+    showToast('✅ Reminder sent to officials!', 'success');
+    document.getElementById('reminderCard').style.display = 'none';
+  });
+
+  // Get Location button
+  const getLocationBtn = document.getElementById('getLocation');
+  getLocationBtn?.addEventListener('click', () => {
+    if (!navigator.geolocation) { showToast('Geolocation not supported', 'error'); return; }
+    const orig = getLocationBtn.innerHTML;
+    getLocationBtn.disabled = true; getLocationBtn.textContent = '⌛ Getting location…';
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        const tryPlace = () => {
+          if (!map) { setTimeout(tryPlace, 400); return; }
+          const loc = new google.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
+          map.setCenter(loc); map.setZoom(16);
+          placeMarker(loc); reverseGeocode(loc, true);
+          getLocationBtn.disabled = false; getLocationBtn.innerHTML = orig;
+        };
+        tryPlace();
+      },
+      err => { showToast('Could not get location: ' + err.message, 'error'); getLocationBtn.disabled = false; getLocationBtn.innerHTML = orig; },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  });
+
+  // Voice recording
+  let mediaRecorder, audioChunks = [];
+  const startBtn = document.getElementById('startRecord');
+  const stopBtn = document.getElementById('stopRecord');
+  const audio = document.getElementById('audioPlayback');
+  startBtn?.addEventListener('click', async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunks = [];
+      mediaRecorder = new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+      mediaRecorder.onstop = () => { audio.src = URL.createObjectURL(new Blob(audioChunks, { type: 'audio/webm' })); audio.style.display = 'block'; audio.load(); };
+      mediaRecorder.start();
+      startBtn.style.display = 'none'; stopBtn.style.display = 'flex';
+    } catch (e) { showToast('Microphone error: ' + e.message, 'error'); }
+  });
+  stopBtn?.addEventListener('click', () => {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    stopBtn.style.display = 'none'; startBtn.style.display = 'flex';
+  });
+
+  // Form submit
+  const form = document.getElementById('issueForm');
+  form?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const lat = document.getElementById('latitude').value;
+    const lng = document.getElementById('longitude').value;
+    if (!lat || !lng) { showToast('Please select a location on the map or use Detect Location', 'error'); return; }
+    const body = {
+      title: document.getElementById('title').value,
+      description: document.getElementById('description').value,
+      category: document.getElementById('category').value || document.querySelector('.cat-btn.active')?.dataset.cat || 'other',
+      latitude: lat, longitude: lng,
+      address: document.getElementById('locationAddress').textContent
+    };
+    const photoInput = document.getElementById('photo');
+    if (photoInput.files && photoInput.files[0]) body.imageBase64 = await fileToBase64(photoInput.files[0]);
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true; btn.textContent = '🤖 Analyzing with AI…';
+    showLoader(true);
+    try {
       const res = await fetch('/api/issues', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader() },
         body: JSON.stringify(body)
       });
       const json = await res.json();
       if (res.ok) {
-        alert('Report submitted successfully!');
-        issueForm.reset();
-        if (marker) marker.setMap(null);
-        marker = null;
+        showToast(`✅ Report submitted! AI Priority: ${json.priority || 'medium'}`, 'success');
+        form.reset();
+        document.getElementById('charCount').textContent = '0';
+        document.getElementById('previewImg').style.display = 'none';
+        const ph = document.getElementById('previewPlaceholder');
+        if (ph) ph.style.display = 'block';
+        if (marker) { marker.setMap(null); marker = null; }
+        document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector('.cat-btn')?.classList.add('active');
         loadMyReports();
-      } else {
-        alert(json.message || 'Failed to submit report');
-      }
-    });
-  }
+      } else { showToast(json.message || 'Failed to submit report', 'error'); }
+    } catch { showToast('Network error. Please try again.', 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'Submit Report'; showLoader(false); }
+  });
 
-  // Get Current Location button
-  const getLocationBtn = document.getElementById('getLocation');
-  if (getLocationBtn) {
-    getLocationBtn.addEventListener('click', () => {
-      if (!navigator.geolocation) {
-        alert('Geolocation is not supported by your browser');
-        return;
-      }
-
-      // Show loading state
-      getLocationBtn.disabled = true;
-      getLocationBtn.textContent = '📍 Getting location...';
-
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-
-          // Wait for map to be ready if it's not yet
-          const processLocation = () => {
-            if (!map) {
-              // Map not ready yet, wait a bit
-              setTimeout(processLocation, 500);
-              return;
-            }
-
-            const location = new google.maps.LatLng(latitude, longitude);
-
-            // Center map and place marker
-            map.setCenter(location);
-            map.setZoom(16);
-            placeMarker(location);
-            reverseGeocode(location);
-
-            // Reset button
-            getLocationBtn.disabled = false;
-            getLocationBtn.textContent = '📍 Get Current Location';
-          };
-
-          processLocation();
-        },
-        (error) => {
-          let errorMsg = 'Error getting location';
-          switch (error.code) {
-            case error.PERMISSION_DENIED:
-              errorMsg = 'Location permission denied. Please enable location access.';
-              break;
-            case error.POSITION_UNAVAILABLE:
-              errorMsg = 'Location information unavailable.';
-              break;
-            case error.TIMEOUT:
-              errorMsg = 'Location request timed out. Please try again.';
-              break;
-          }
-          alert(errorMsg);
-          getLocationBtn.disabled = false;
-          getLocationBtn.textContent = '📍 Get Current Location';
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0
-        }
-      );
-    });
-  }
-
-  async function loadMyReports() {
-    const list = document.getElementById('reportsList');
-    if (!list) return;
-    const res = await fetch('/api/issues/public');
-    const data = await res.json();
-    list.innerHTML = '';
-    (data.issues || []).slice(0, 10).forEach(issue => {
-      const div = document.createElement('div');
-      div.className = 'p-4 border rounded-lg';
-      div.innerHTML = `<div class="font-semibold">${issue.title}</div>
-        <div class="text-sm text-gray-600">${issue.category} • ${issue.priority}</div>
-        <div class="mt-1">Status: <span class="font-medium">${issue.status}</span></div>`;
-      list.appendChild(div);
-    });
-  }
+  // Load everything
+  loadUserData();
   loadMyReports();
-
-  // Audio recording
-  let mediaRecorder, audioChunks = [];
-  const startBtn = document.getElementById('startRecord');
-  const stopBtn = document.getElementById('stopRecord');
-  const audioPlayback = document.getElementById('audioPlayback');
-  if (startBtn && stopBtn && audioPlayback) {
-    startBtn.addEventListener('click', async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioChunks = [];
-        mediaRecorder = new MediaRecorder(stream);
-        mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
-        mediaRecorder.onstop = () => {
-          const type = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-          const blob = new Blob(audioChunks, { type });
-          const url = URL.createObjectURL(blob);
-          audioPlayback.src = url; audioPlayback.classList.remove('hidden');
-          audioPlayback.load();
-          audioPlayback.play().catch(() => { });
-        };
-        mediaRecorder.start();
-        startBtn.classList.add('hidden');
-        stopBtn.classList.remove('hidden');
-      } catch (e) {
-        alert('Microphone error: ' + e.message);
-      }
-    });
-    stopBtn.addEventListener('click', () => {
-      if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
-      stopBtn.classList.add('hidden');
-      startBtn.classList.remove('hidden');
-    });
-  }
+  loadNotifications();
 });

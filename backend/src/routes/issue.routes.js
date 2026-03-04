@@ -37,6 +37,7 @@ router.delete('/:id', issueController.deleteIssue);
 router.post('/:id/comment', issueController.addComment);
 router.post('/:id/upvote', issueController.toggleUpvote);
 router.post('/:id/feedback', issueController.submitFeedback);
+router.post('/:id/reminder', issueController.sendReminder);
 
 router.put('/:id/assign', authorize(['admin', 'staff']), issueController.assignIssue);
 

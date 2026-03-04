@@ -1,187 +1,497 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Report civic issues in your community">
-    <meta name="theme-color" content="#3B82F6">
-    <title>VoiceUp - Citizen Panel</title>
-    
-    <!-- PWA Meta Tags -->
-    <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="images/icon-192x192.png">
-    
-    <!-- Tailwind via local proxy to avoid CDN issues -->
-    <script src="/assets/tailwind.js"></script>
-    
-    <!-- Google Maps API -->
-    <!-- Note: Replace YOUR_API_KEY with your actual Google Maps API key -->
-    
-    <!-- Custom Styles -->
-    <style>
-        #map { height: 300px; width: 100%; }
-        .loader { border-top-color: #3B82F6; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Report civic issues in your community">
+  <meta name="theme-color" content="#6C3FC5">
+  <title>VoiceUp - Citizen Panel</title>
+
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="images/icon-192x192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/citizen.css?v=2">
+
+  <style>#map,#detailMap{height:200px;width:100%;}</style>
+
+  <!-- Auth guard -->
+  <script src="js/auth.js"></script>
+  <script>if(!isLoggedIn())window.location.replace('/login.html');</script>
+  <div id="toast" class="toast"></div>
+
+<!-- ══════════ ALL REPORTS MODAL ══════════ -->
+<div class="modal-overlay" id="allReportsModal">
+  <div class="detail-modal" style="max-height:80vh;display:flex;flex-direction:column;">
+    <button class="modal-close-btn" id="allReportsCloseBtn" title="Close">✕</button>
+    <div class="modal-breadcrumb" style="margin-bottom:20px;">
+      <span id="bcTitleAll">All My Reports</span>
+    </div>
+    <div id="allReportsList" style="overflow-y:auto;flex:1;padding-right:10px;"></div>
+  </div>
+</div>
+
+  <!-- Socket.io -->
+  <script src="/socket.io/socket.io.js"></script>
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <!-- Header -->
-    <header class="bg-blue-600 text-white p-4 shadow-lg sticky top-0 z-50">
-        <div class="container mx-auto flex justify-between items-center">
-            <h1 class="text-xl font-bold">VoiceUp</h1>
-            <button id="menuBtn" class="lg:hidden">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
-                </svg>
-            </button>
+<body>
+
+<!-- ══════════ HEADER ══════════ -->
+<header class="header">
+  <div class="logo" style="color: #2a75a3;">
+    <img src="images/voiceup.svg" alt="VoiceUp Logo" width="70" height="100" style="object-fit: contain;">
+    VoiceUp
+  </div>
+
+  <div class="header-search">
+    <svg width="16" height="16" fill="none" stroke="#A78BFA" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input type="text" placeholder="Search reports…" id="searchInput">
+  </div>
+
+  <div class="header-actions">
+
+    <!-- Notification Bell + Dropdown -->
+    <div class="notif-btn-wrap">
+      <button class="notif-btn" id="notifBtn" title="Notifications">
+        <svg width="18" height="18" fill="none" stroke="#6C3FC5" stroke-width="2" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span class="notif-badge" id="notifCount">0</span>
+      </button>
+      <div class="notif-dropdown" id="notifDropdown">
+        <div class="notif-dropdown-header">
+          <span class="notif-dropdown-title">Notifications</span>
+          <button class="notif-mark-read" id="markAllReadBtn">Mark all read</button>
         </div>
-    </header>
-
-    <!-- Navigation -->
-    <nav id="mobileMenu" class="hidden bg-white shadow-md p-4">
-        <ul class="space-y-2">
-            <li><a href="#report" class="block p-2 hover:bg-gray-100 rounded">Report Issue</a></li>
-            <li><a href="#my-reports" class="block p-2 hover:bg-gray-100 rounded">My Reports</a></li>
-            <li><a href="#track" class="block p-2 hover:bg-gray-100 rounded">Track Status</a></li>
-            <li><a href="#notifications" class="block p-2 hover:bg-gray-100 rounded">Notifications</a></li>
-        </ul>
-    </nav>
-
-    <!-- Main Content -->
-    <main class="container mx-auto p-4 max-w-4xl">
-        <!-- Issue Reporting Form -->
-        <section id="report" class="bg-white rounded-lg shadow-md p-6 mb-6">
-            <h2 class="text-2xl font-bold mb-4 text-gray-800">Report a Civic Issue</h2>
-            
-            <form id="issueForm" class="space-y-4">
-                <!-- Issue Category -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Issue Category</label>
-                    <select id="category" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" required>
-                        <option value="">Select a category</option>
-                        <option value="pothole">Pothole</option>
-                        <option value="streetlight">Street Light</option>
-                        <option value="garbage">Garbage/Sanitation</option>
-                        <option value="water">Water Supply</option>
-                        <option value="sewage">Sewage</option>
-                        <option value="traffic">Traffic Signal</option>
-                        <option value="other">Other</option>
-                    </select>
-                </div>
-
-                <!-- Issue Title -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Title</label>
-                    <input type="text" id="title" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500" 
-                           placeholder="Brief description of the issue" required>
-                </div>
-
-                <!-- Description -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Description</label>
-                    <textarea id="description" rows="4" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500" 
-                              placeholder="Provide detailed information about the issue" required></textarea>
-                </div>
-
-                <!-- Image Upload -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Upload Photo</label>
-                    <input type="file" id="photo" accept="image/*" capture="environment" 
-                           class="w-full p-3 border rounded-lg file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
-                    <div id="imagePreview" class="mt-2"></div>
-                </div>
-
-                <!-- Voice Recording -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Voice Description (Optional)</label>
-                    <div class="flex space-x-2">
-                        <button type="button" id="startRecord" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
-                            Start Recording
-                        </button>
-                        <button type="button" id="stopRecord" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 hidden">
-                            Stop Recording
-                        </button>
-                        <audio id="audioPlayback" controls class="hidden"></audio>
-                    </div>
-                </div>
-
-                <!-- Location -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Location</label>
-                    <button type="button" id="getLocation" class="w-full p-3 bg-green-500 text-white rounded-lg hover:bg-green-600 mb-2">
-                        📍 Get Current Location
-                    </button>
-                    <div id="map" class="rounded-lg"></div>
-                    <input type="hidden" id="latitude">
-                    <input type="hidden" id="longitude">
-                    <p id="locationAddress" class="mt-2 text-sm text-gray-600"></p>
-                </div>
-
-                <!-- Priority -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Priority Level</label>
-                    <div class="flex space-x-4">
-                        <label class="flex items-center">
-                            <input type="radio" name="priority" value="low" class="mr-2" checked>
-                            <span class="text-green-600">Low</span>
-                        </label>
-                        <label class="flex items-center">
-                            <input type="radio" name="priority" value="medium" class="mr-2">
-                            <span class="text-yellow-600">Medium</span>
-                        </label>
-                        <label class="flex items-center">
-                            <input type="radio" name="priority" value="high" class="mr-2">
-                            <span class="text-red-600">High</span>
-                        </label>
-                    </div>
-                </div>
-
-                <!-- Submit Button -->
-                <button type="submit" class="w-full p-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold text-lg">
-                    Submit Report
-                </button>
-            </form>
-        </section>
-
-        <!-- My Reports Section -->
-        <section id="my-reports" class="bg-white rounded-lg shadow-md p-6 mb-6">
-            <h2 class="text-2xl font-bold mb-4 text-gray-800">My Reports</h2>
-            <div id="reportsList" class="space-y-4">
-                <!-- Reports will be dynamically loaded here -->
-            </div>
-        </section>
-
-        <!-- Notifications -->
-        <section id="notifications" class="bg-white rounded-lg shadow-md p-6">
-            <h2 class="text-2xl font-bold mb-4 text-gray-800">Notifications</h2>
-            <div id="notificationsList" class="space-y-2">
-                <!-- Notifications will be dynamically loaded here -->
-            </div>
-        </section>
-    </main>
-
-    <!-- Loading Spinner -->
-    <div id="loader" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div class="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-16 w-16 animate-spin"></div>
+        <div class="notif-dropdown-list" id="notifDropdownList"></div>
+        <div class="notif-dropdown-footer" id="notifFooter">View all notifications</div>
+      </div>
     </div>
 
-    <!-- Success/Error Messages -->
-    <div id="toast" class="hidden fixed bottom-4 right-4 p-4 rounded-lg shadow-lg z-50 max-w-sm">
-        <p id="toastMessage"></p>
+    <!-- Voice Coins Chip -->
+    <button class="coins-chip" id="coinsBadge" title="My Wallet & Rewards">
+      <span class="coin-icon">🪙</span>
+      <span class="coin-amt" id="headerCoins">0</span>
+      <span class="coin-label">VC</span>
+    </button>
+
+    <!-- Profile Chip + Dropdown -->
+    <div class="user-chip-wrap">
+      <div class="user-chip" id="userChip">
+        <div class="user-avatar" id="userInitial">U</div>
+        <span id="userName">Hi, User</span>
+        <svg width="14" height="14" fill="none" stroke="#6C3FC5" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="profile-dropdown" id="profileDropdown">
+        <div class="profile-dropdown-user">
+          <div class="profile-dropdown-user-name" id="pdName">User</div>
+          <div class="profile-dropdown-user-email" id="pdEmail">user@email.com</div>
+        </div>
+        <button class="pd-item" id="pdMyProfile"><span class="pd-icon">👤</span> My Profile</button>
+        <button class="pd-item" id="pdMyRewards"><span class="pd-icon">🎁</span> My Rewards</button>
+        <button class="pd-item" id="pdSettings"><span class="pd-icon">⚙️</span> Settings</button>
+        <button class="pd-item logout" id="pdLogout"><span class="pd-icon">🚪</span> Logout</button>
+      </div>
     </div>
 
-    <!-- Google Maps API -->
-    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCwBbQyUgHCh6mK9xk2vmG-f-Y_yqkQ_bk&libraries=places&callback=initMap" async defer></script>
-    
-    <!-- Main JavaScript -->
-    <script src="js/app.js"></script>
-    
-    <!-- Service Worker Registration -->
-    <script>
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js')
-                .then(reg => console.log('Service Worker registered'))
-                .catch(err => console.error('Service Worker registration failed:', err));
-        }
-    </script>
+  </div>
+</header>
+
+<!-- ══════════ MAIN PAGE ══════════ -->
+<div class="page-container">
+
+  <!-- LEFT COLUMN -->
+  <div class="left-col">
+    <div>
+      <h1 class="page-title">Report a Civic Issue</h1>
+      <p class="page-subtitle">Help us improve our community by reporting issues you encounter.</p>
+    </div>
+
+    <!-- FORM CARD -->
+    <div class="glass-card form-card">
+      <form id="issueForm">
+
+        <!-- Category -->
+        <p class="form-section-title">Issue Category</p>
+        <div class="category-grid">
+          <button type="button" class="cat-btn active" data-cat="streetlight">
+            <span class="cat-icon">💡</span> Streetlight
+          </button>
+          <button type="button" class="cat-btn" data-cat="water">
+            <span class="cat-icon">💧</span> Water
+          </button>
+          <button type="button" class="cat-btn" data-cat="road">
+            <span class="cat-icon">🛣️</span> Road
+          </button>
+          <button type="button" class="cat-btn" data-cat="garbage">
+            <span class="cat-icon">🗑️</span> Garbage
+          </button>
+        </div>
+
+        <select class="sub-select" id="category">
+          <option value="">Select sub-category…</option>
+          <option value="streetlight">Streetlight not working</option>
+          <option value="pothole">Pothole</option>
+          <option value="water">Water leakage</option>
+          <option value="sewage">Sewage overflow</option>
+          <option value="garbage">Overflowing trash bin</option>
+          <option value="traffic">Traffic signal</option>
+          <option value="other">Other</option>
+        </select>
+
+        <!-- Title -->
+        <input type="text" class="form-input" id="title" placeholder="Streetlight not working" required>
+
+        <!-- Description -->
+        <textarea class="form-textarea" id="description" maxlength="300" placeholder="Provide detailed information about the issue…" required></textarea>
+        <div class="char-count"><span id="charCount">0</span>/300</div>
+
+        <!-- Upload -->
+        <p class="form-section-title">Upload Photo</p>
+        <div class="upload-section">
+          <div class="image-preview-box">
+            <img id="previewImg" src="" alt="" style="display:none;">
+            <span class="image-placeholder" id="previewPlaceholder">🖼️</span>
+          </div>
+          <div class="upload-actions">
+            <label class="upload-btn">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Upload Photo
+              <input type="file" id="photo" accept="image/*" capture="environment">
+            </label>
+            <button type="button" class="record-btn" id="startRecord">
+              🎙️ Tap to Record
+            </button>
+            <button type="button" class="record-btn recording" id="stopRecord" style="display:none;">
+              ⏹️ Stop Recording
+            </button>
+            <audio id="audioPlayback" controls style="display:none;width:100%;margin-top:4px;"></audio>
+          </div>
+        </div>
+
+        <!-- AI note -->
+        <div class="ai-note">
+          <span>🤖</span>
+          <span>AI will automatically detect priority — based on the attached image and report frequency.</span>
+        </div>
+
+        <!-- Submit -->
+        <button type="submit" class="submit-btn" id="submitBtn">Submit Report</button>
+
+        <!-- Hidden location fields -->
+        <input type="hidden" id="latitude">
+        <input type="hidden" id="longitude">
+        <p id="locationAddress" style="display:none;"></p>
+      </form>
+    </div>
+
+    <!-- NOTIFICATIONS (below form) -->
+    <div class="notif-panel" id="notifSection">
+      <h2 class="notif-title">Notifications</h2>
+      <div id="notificationsList"></div>
+    </div>
+  </div>
+
+  <!-- RIGHT COLUMN -->
+  <div class="right-col">
+
+    <!-- Map card -->
+    <div class="glass-card map-card">
+      <div class="map-location-header">
+        <div class="map-location-icon">📍</div>
+        <div class="map-location-info">
+          <div class="map-location-name" id="mapLocName">Select Location</div>
+          <div class="map-location-addr" id="mapLocAddr">Click on the map or detect your location</div>
+        </div>
+      </div>
+      <div id="map"></div>
+      <button type="button" class="detect-btn" id="getLocation">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+        Detect Location
+      </button>
+      <div class="map-coords" id="mapCoords">Lat: —, Lng: —</div>
+    </div>
+
+    <!-- My Reports -->
+    <div class="glass-card my-reports-card">
+      <div class="section-header">
+        <span class="section-title">My Reports</span>
+        <a class="view-all-link" id="viewAllReportsBtn" style="cursor:pointer;">View All</a>
+      </div>
+      <div id="reportsList"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════ REPORT DETAIL MODAL ══════════ -->
+<div class="modal-overlay" id="detailModal">
+  <div class="detail-modal">
+    <button class="modal-close-btn" id="modalCloseBtn" title="Close">✕</button>
+
+    <!-- Breadcrumb -->
+    <div class="modal-breadcrumb">
+      <a id="bcHome">My Reports</a>
+      <span class="sep">›</span>
+      <span id="bcTitle">Report Detail</span>
+    </div>
+
+    <!-- Two-column top -->
+    <div class="modal-top">
+
+      <!-- LEFT side -->
+      <div>
+        <div class="report-header">
+          <div class="report-header-icon" id="mdIcon">💡</div>
+          <div>
+            <div class="report-header-title" id="mdTitle">Streetlight not working</div>
+            <div class="badges-row">
+              <span class="priority-badge high" id="mdPriority">🔴 High Priority</span>
+              <span class="status-pill in-progress" id="mdStatus">In Progress</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="report-meta-row">
+          <span class="item">
+            <svg stroke="currentColor" fill="none" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            <span id="mdAddr">—</span>
+          </span>
+          <span class="item">📅 <span id="mdDate">—</span></span>
+          <span class="item">👁 <span id="mdViews">—</span></span>
+          <span class="item">❤️ <span id="mdLikes">—</span></span>
+        </div>
+
+        <!-- Points earned -->
+        <div class="points-banner" id="pointsBanner" style="margin-top:16px;">
+          <div class="points-gift">🎁</div>
+          <div class="points-banner-text">
+            <strong>You earned <span id="mdPoints">35</span> Voice Points</strong>
+            <p>for reporting this issue!<br>Keep helping your community to earn more rewards.</p>
+          </div>
+        </div>
+
+        <!-- Timeline track -->
+        <div class="timeline-section" style="margin-top:20px;">
+          <div class="timeline-label">Report Timeline</div>
+          <div class="timeline-track">
+            <div class="tl-step done">
+              <div class="tl-dot">✓</div>
+              <div class="tl-name">Submitted</div>
+              <div class="tl-date" id="tl-submitted">—</div>
+            </div>
+            <div class="tl-step active" id="tlInProgress">
+              <div class="tl-dot">→</div>
+              <div class="tl-name">In Progress</div>
+              <div class="tl-date" id="tl-inprogress">—</div>
+            </div>
+            <div class="tl-step" id="tlApproved">
+              <div class="tl-dot"></div>
+              <div class="tl-name">Approved</div>
+              <div class="tl-date" id="tl-approved"></div>
+            </div>
+            <div class="tl-step" id="tlResolved">
+              <div class="tl-dot"></div>
+              <div class="tl-name">Resolved</div>
+              <div class="tl-date" id="tl-resolved"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Assigned note -->
+        <div class="assigned-note" id="assignedNote" style="display:none;">
+          <span class="assigned-note-icon">🔁</span>
+          <p>Assigned to <strong id="assignedDept">Public Works Department</strong>. A technician has been dispatched to check the issue.</p>
+        </div>
+
+        <!-- Reminder card -->
+        <div class="reminder-card" id="reminderCard" style="display:none;">
+          <span style="font-size:1.3rem;">📣</span>
+          <p>You can remind officials about this report since it's been over 24 hours.</p>
+          <button class="reminder-send-btn" id="sendReminderBtn">Send Reminder</button>
+        </div>
+      </div>
+
+      <!-- RIGHT side -->
+      <div class="modal-right">
+        <!-- Mini map -->
+        <div class="mini-map-card glass-card">
+          <div class="mini-map-header">
+            <span>📍</span>
+            <div>
+              <strong id="mdMapName">—</strong>
+              <small id="mdMapAddr">—</small>
+            </div>
+          </div>
+          <div id="detailMap"></div>
+          <div class="mini-map-coords">
+            <span id="mdCoords">Lat: —, Lng: —</span>
+            <span style="cursor:pointer;color:#8B5CF6;">✏️</span>
+          </div>
+        </div>
+
+        <!-- Feed card -->
+        <div class="feed-card">
+          <div class="feed-header">
+            <span class="feed-title">Report Timeline</span>
+            <div class="feed-tabs">
+              <button class="feed-tab active" id="tabUpdates">Updates (0)</button>
+              <button class="feed-tab" id="tabPoints">Points (0)</button>
+            </div>
+          </div>
+          <div id="feedList"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Body area (notifications of report) -->
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<!-- ══════════ WALLET / REWARDS MODAL ══════════ -->
+<div class="wallet-modal-overlay" id="walletModal">
+  <div class="wallet-modal">
+    <button class="modal-close-btn" id="walletCloseBtn">✕</button>
+    <div class="wallet-header">
+      <h2>🏪 Rewards Store</h2>
+      <p>Redeem your Voice Coins for exclusive gift cards and vouchers.</p>
+      <div class="wallet-balance">🪙 <span id="walletCoins">0</span> Voice Coins available</div>
+    </div>
+    <div class="wallet-section-title">Gift Cards</div>
+    <div class="gift-card-grid">
+      <div class="gift-card">
+        <div class="gift-card-logo">🛍️</div>
+        <div class="gift-card-name">Myntra</div>
+        <div class="gift-card-cost">🪙 500 VC</div>
+        <div class="gift-card-desc">₹200 fashion voucher</div>
+        <button class="redeem-btn" data-cost="500" data-store="Myntra">Redeem</button>
+      </div>
+      <div class="gift-card">
+        <div class="gift-card-logo">📦</div>
+        <div class="gift-card-name">Flipkart</div>
+        <div class="gift-card-cost">🪙 300 VC</div>
+        <div class="gift-card-desc">₹150 shopping voucher</div>
+        <button class="redeem-btn" data-cost="300" data-store="Flipkart">Redeem</button>
+      </div>
+      <div class="gift-card">
+        <div class="gift-card-logo">👗</div>
+        <div class="gift-card-name">Zara</div>
+        <div class="gift-card-cost">🪙 800 VC</div>
+        <div class="gift-card-desc">₹500 fashion voucher</div>
+        <button class="redeem-btn" data-cost="800" data-store="Zara">Redeem</button>
+      </div>
+      <div class="gift-card">
+        <div class="gift-card-logo">📱</div>
+        <div class="gift-card-name">Amazon</div>
+        <div class="gift-card-cost">🪙 400 VC</div>
+        <div class="gift-card-desc">₹200 shopping voucher</div>
+        <button class="redeem-btn" data-cost="400" data-store="Amazon">Redeem</button>
+      </div>
+      <div class="gift-card">
+        <div class="gift-card-logo">☕</div>
+        <div class="gift-card-name">Starbucks</div>
+        <div class="gift-card-cost">🪙 200 VC</div>
+        <div class="gift-card-desc">Free coffee voucher</div>
+        <button class="redeem-btn" data-cost="200" data-store="Starbucks">Redeem</button>
+      </div>
+      <div class="gift-card">
+        <div class="gift-card-logo">🍕</div>
+        <div class="gift-card-name">Zomato</div>
+        <div class="gift-card-cost">🪙 150 VC</div>
+        <div class="gift-card-desc">₹100 food voucher</div>
+        <button class="redeem-btn" data-cost="150" data-store="Zomato">Redeem</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ MY PROFILE MODAL ══════════ -->
+<div class="profile-modal-overlay" id="profileModal">
+  <div class="profile-modal">
+    <button class="modal-close-btn" id="profileCloseBtn">✕</button>
+    <div class="pm-top">
+      <div class="pm-avatar" id="pmAvatar">
+        <span id="pmAvatarInitial">U</span>
+        <span class="pm-avatar-edit">✏️</span>
+      </div>
+      <div class="pm-info">
+        <h2 id="pmName">Loading…</h2>
+        <p id="pmEmail">—</p>
+        <div id="pmBadge" class="badge-chip">👋 Newcomer</div>
+      </div>
+    </div>
+    <div class="profile-stats-grid">
+      <div class="profile-stat">
+        <div class="profile-stat-num" id="pmTotalReports">0</div>
+        <div class="profile-stat-label">Reports Filed</div>
+      </div>
+      <div class="profile-stat">
+        <div class="profile-stat-num" id="pmResolved">0</div>
+        <div class="profile-stat-label">Resolved</div>
+      </div>
+      <div class="profile-stat">
+        <div class="profile-stat-num" id="pmCoins">0</div>
+        <div class="profile-stat-label">Voice Coins</div>
+      </div>
+    </div>
+    <form class="pm-form" id="profileForm">
+      <label class="pm-field-label">Full Name</label>
+      <input class="pm-input" id="pmInputName" type="text" placeholder="Your full name">
+      <label class="pm-field-label">Phone Number</label>
+      <input class="pm-input" id="pmInputPhone" type="tel" placeholder="+91 XXXXX XXXXX">
+      <label class="pm-field-label">Bio</label>
+      <input class="pm-input" id="pmInputBio" type="text" placeholder="Tell us about yourself…">
+      <div class="pm-row">
+        <div>
+          <label class="pm-field-label">City</label>
+          <input class="pm-input" id="pmInputCity" type="text" placeholder="City">
+        </div>
+        <div>
+          <label class="pm-field-label">State</label>
+          <input class="pm-input" id="pmInputState" type="text" placeholder="State">
+        </div>
+      </div>
+      <button type="submit" class="pm-save-btn" id="pmSaveBtn">Save Changes</button>
+    </form>
+  </div>
+</div>
+
+<!-- Loader -->
+<div class="loader-overlay" id="loaderOverlay">
+  <div class="spinner"></div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- Main JS -->
+<script src="js/app.js?v=2"></script>
+
+<!-- Google Maps -->
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCwBbQyUgHCh6mK9xk2vmG-f-Y_yqkQ_bk&libraries=places&callback=initMap" async defer></script>
+
+<!-- Auth: show user -->
+<script>
+(function(){
+  const u = getUser();
+  if(u){
+    document.getElementById('userName').textContent = 'Hi, ' + u.name;
+    const init = u.name ? u.name.charAt(0).toUpperCase() : 'U';
+    document.getElementById('userInitial').textContent = init;
+    document.getElementById('logoutBtn').style.display = 'block';
+  }
+})();
+</script>
+
+<!-- Service Worker -->
+<script>
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js')
+    .then(()=>console.log('SW registered'))
+    .catch(e=>console.error('SW failed:',e));
+}
+</script>
+
 </body>
 </html>

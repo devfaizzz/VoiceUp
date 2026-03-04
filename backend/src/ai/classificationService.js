@@ -1,316 +1,167 @@
-// TensorFlow disabled for portability on Windows; using mock model
-const sharp = require('sharp');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Issue = require('../models/Issue');
 const logger = require('../utils/logger');
 
 class ClassificationService {
   constructor() {
     this.model = null;
-    this.categories = [
-      'pothole',
-      'streetlight',
-      'garbage',
-      'water',
-      'sewage',
-      'traffic',
-      'other'
-    ];
-    this.priorityLevels = ['low', 'medium', 'high', 'critical'];
   }
 
   /**
-   * Initialize the AI model
+   * Initialize Gemini model
    */
-  async initialize() {
-    try {
-      // In production, load a pre-trained model
-      // this.model = await tf.loadLayersModel('file://./models/issue-classifier/model.json');
-      
-      // For now, create a simple mock model
-      this.model = this.createMockModel();
-      logger.info('AI Classification Service initialized');
-    } catch (error) {
-      logger.error('Failed to initialize AI model:', error);
+  initialize() {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      logger.warn('GEMINI_API_KEY not set — AI classification will fall back to text-only');
+      return;
     }
+    const genAI = new GoogleGenerativeAI(apiKey);
+    this.model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    logger.info('AI Classification Service initialized (Gemini 2.0 Flash)');
   }
 
   /**
-   * Create a mock model for demonstration
+   * Classify an issue using Gemini Vision + duplicate count
+   * @param {Buffer|null} imageBuffer - uploaded image (optional)
+   * @param {string} title
+   * @param {string} description
+   * @param {string} category
+   * @param {number} longitude
+   * @param {number} latitude
+   * @returns {{ priority, severity, duplicateCount, aiReason }}
    */
-  createMockModel() {
-    return {
-      predict: () => {
-        // Simulate model prediction
-        return {
-          category: this.categories[Math.floor(Math.random() * this.categories.length)],
-          confidence: 0.75 + Math.random() * 0.25
-        };
+  async classify(imageBuffer, title, description, category, longitude, latitude) {
+    let severity = 5; // default mid severity
+    let aiReason = '';
+
+    // ── 1. Gemini Vision — image severity ──
+    if (this.model && imageBuffer) {
+      try {
+        const result = await this.analyzeImage(imageBuffer, title, description, category);
+        severity = result.severity;
+        aiReason = result.reason;
+      } catch (err) {
+        logger.error('Gemini image analysis failed, using text fallback:', err.message);
+        severity = this.textSeverity(title, description);
+        aiReason = 'Gemini unavailable, text-based fallback';
+      }
+    } else {
+      // No image or no model — use text-based severity
+      severity = this.textSeverity(title, description);
+      aiReason = imageBuffer ? 'Gemini not configured, text-based' : 'No image, text-based';
+    }
+
+    // ── 2. Duplicate count — nearby same-category reports ──
+    let duplicateCount = 0;
+    if (longitude && latitude) {
+      duplicateCount = await this.countDuplicates(longitude, latitude, category);
+    }
+
+    // ── 3. Calculate priority ──
+    const priority = this.calculatePriority(severity, duplicateCount);
+
+    return { priority, severity, duplicateCount, aiReason };
+  }
+
+  /**
+   * Analyze image with Gemini Vision
+   */
+  async analyzeImage(imageBuffer, title, description, category) {
+    const prompt = `You are a civic issue severity analyzer. Analyze this image of a civic issue.
+
+Issue title: "${title}"
+Description: "${description}"
+Category: ${category}
+
+Rate the SEVERITY of this issue from 1 to 10:
+- 1-3: Minor (cosmetic, small, not urgent)
+- 4-6: Moderate (noticeable, should be fixed)
+- 7-8: Serious (safety concern, affecting people)
+- 9-10: Critical (immediate danger, emergency)
+
+Respond ONLY with valid JSON, no markdown:
+{"severity": <number 1-10>, "reason": "<one short sentence>"}`;
+
+    const imagePart = {
+      inlineData: {
+        mimeType: 'image/jpeg',
+        data: imageBuffer.toString('base64')
       }
     };
-  }
 
-  /**
-   * Classify an issue based on image and text
-   */
-  async classifyIssue(imageBuffer, text, metadata = {}) {
+    const result = await this.model.generateContent([prompt, imagePart]);
+    const text = result.response.text().trim();
+
+    // Parse JSON from response
     try {
-      const features = await this.extractFeatures(imageBuffer, text, metadata);
-      const prediction = await this.predict(features);
-      const priority = this.determinePriority(prediction, text, metadata);
-      
-      return {
-        category: prediction.category,
-        confidence: prediction.confidence,
-        suggestedPriority: priority,
-        processedAt: new Date(),
-        features: features
-      };
-    } catch (error) {
-      logger.error('Classification error:', error);
-      return {
-        category: 'other',
-        confidence: 0,
-        suggestedPriority: 'medium',
-        error: error.message
-      };
+      const clean = text.replace(/```json\s*/g, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(clean);
+      const sev = Math.max(1, Math.min(10, Math.round(parsed.severity)));
+      return { severity: sev, reason: parsed.reason || '' };
+    } catch {
+      logger.warn('Failed to parse Gemini response:', text);
+      return { severity: 5, reason: 'Could not parse AI response' };
     }
   }
 
   /**
-   * Extract features from image and text
+   * Text-based severity fallback (no image)
    */
-  async extractFeatures(imageBuffer, text, metadata) {
-    const features = {
-      imageFeatures: null,
-      textFeatures: null,
-      metadataFeatures: null
-    };
+  textSeverity(title, description) {
+    const text = `${title} ${description}`.toLowerCase();
+    const critical = ['emergency', 'danger', 'accident', 'injury', 'collapsed', 'flood', 'fire'];
+    const high = ['urgent', 'hazard', 'broken', 'blocked', 'overflow', 'burst', 'severe'];
+    const medium = ['damaged', 'leak', 'crack', 'pothole', 'garbage', 'smell', 'dark'];
 
-    // Image feature extraction
-    if (imageBuffer) {
-      features.imageFeatures = await this.extractImageFeatures(imageBuffer);
-    }
+    const critCount = critical.filter(k => text.includes(k)).length;
+    const highCount = high.filter(k => text.includes(k)).length;
+    const medCount = medium.filter(k => text.includes(k)).length;
 
-    // Text feature extraction
-    if (text) {
-      features.textFeatures = this.extractTextFeatures(text);
-    }
-
-    // Metadata features
-    if (metadata) {
-      features.metadataFeatures = this.extractMetadataFeatures(metadata);
-    }
-
-    return features;
+    if (critCount >= 2) return 9;
+    if (critCount >= 1) return 7;
+    if (highCount >= 2) return 7;
+    if (highCount >= 1) return 6;
+    if (medCount >= 1) return 4;
+    return 3;
   }
 
   /**
-   * Extract features from image
+   * Count duplicate reports within 200m, same category, last 30 days
    */
-  async extractImageFeatures(imageBuffer) {
+  async countDuplicates(longitude, latitude, category) {
     try {
-      // Preprocess image
-      const processedImage = await sharp(imageBuffer)
-        .resize(224, 224) // Standard size for many models
-        .normalise()
-        .toBuffer();
-
-      // In production, convert to tensor and extract features
-      // const tensor = tf.node.decodeImage(processedImage);
-      // const features = this.model.predict(tensor);
-      
-      // Mock features for now
-      return {
-        dominantColors: ['gray', 'black'],
-        brightness: 0.5,
-        contrast: 0.7,
-        hasHole: Math.random() > 0.5,
-        hasWater: Math.random() > 0.7,
-        hasDebris: Math.random() > 0.6
-      };
-    } catch (error) {
-      logger.error('Image feature extraction error:', error);
-      return null;
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      // Use $geoWithin + $centerSphere — doesn't require a 2dsphere index
+      const radiusInRadians = 200 / 6378100; // 200 meters / Earth's radius in meters
+      const count = await Issue.countDocuments({
+        category,
+        createdAt: { $gte: thirtyDaysAgo },
+        'location.coordinates': {
+          $geoWithin: {
+            $centerSphere: [[longitude, latitude], radiusInRadians]
+          }
+        }
+      });
+      return count;
+    } catch (err) {
+      logger.error('Duplicate count query failed:', err.message);
+      return 0;
     }
   }
 
   /**
-   * Extract features from text
+   * Priority formula: severity (1-10) + duplicate boost
    */
-  extractTextFeatures(text) {
-    const lowerText = text.toLowerCase();
-    
-    // Keywords for each category
-    const keywords = {
-      pothole: ['pothole', 'hole', 'road damage', 'crater', 'pavement'],
-      streetlight: ['light', 'lamp', 'dark', 'broken light', 'streetlight'],
-      garbage: ['garbage', 'trash', 'waste', 'litter', 'dump', 'smell'],
-      water: ['water', 'leak', 'pipe', 'flooding', 'burst'],
-      sewage: ['sewage', 'drain', 'sewer', 'overflow', 'blockage'],
-      traffic: ['signal', 'traffic', 'sign', 'traffic light']
-    };
+  calculatePriority(severity, duplicateCount) {
+    // Duplicate boost: each duplicate adds ~0.5 severity points
+    const boosted = severity + Math.min(duplicateCount * 0.5, 3);
 
-    const features = {
-      length: text.length,
-      wordCount: text.split(/\s+/).length,
-      categoryScores: {}
-    };
-
-    // Calculate category scores based on keyword matches
-    for (const [category, categoryKeywords] of Object.entries(keywords)) {
-      features.categoryScores[category] = categoryKeywords.reduce((score, keyword) => {
-        return score + (lowerText.includes(keyword) ? 1 : 0);
-      }, 0);
-    }
-
-    // Urgency indicators
-    features.urgencyScore = this.calculateUrgencyScore(lowerText);
-
-    return features;
-  }
-
-  /**
-   * Calculate urgency score from text
-   */
-  calculateUrgencyScore(text) {
-    const urgentKeywords = [
-      'urgent', 'emergency', 'dangerous', 'hazard', 'immediate',
-      'critical', 'severe', 'accident', 'injury', 'blocked'
-    ];
-
-    return urgentKeywords.reduce((score, keyword) => {
-      return score + (text.includes(keyword) ? 1 : 0);
-    }, 0);
-  }
-
-  /**
-   * Extract features from metadata
-   */
-  extractMetadataFeatures(metadata) {
-    return {
-      hasLocation: !!metadata.location,
-      timeOfDay: metadata.timestamp ? new Date(metadata.timestamp).getHours() : null,
-      dayOfWeek: metadata.timestamp ? new Date(metadata.timestamp).getDay() : null,
-      reporterHistory: metadata.reporterHistory || 0
-    };
-  }
-
-  /**
-   * Make prediction based on features
-   */
-  async predict(features) {
-    // In production, use the actual model
-    // const prediction = await this.model.predict(features);
-    
-    // Mock prediction based on text features
-    if (features.textFeatures) {
-      const scores = features.textFeatures.categoryScores;
-      const maxCategory = Object.keys(scores).reduce((a, b) => 
-        scores[a] > scores[b] ? a : b, 'other'
-      );
-      
-      if (scores[maxCategory] > 0) {
-        return {
-          category: maxCategory,
-          confidence: Math.min(0.95, 0.6 + scores[maxCategory] * 0.15)
-        };
-      }
-    }
-
-    // Default mock prediction
-    return this.model.predict();
-  }
-
-  /**
-   * Determine priority based on classification and other factors
-   */
-  determinePriority(prediction, text, metadata) {
-    let priorityScore = 0;
-
-    // Factor 1: Category-based priority
-    const categoryPriorities = {
-      sewage: 3,
-      water: 3,
-      pothole: 2,
-      traffic: 2,
-      streetlight: 1,
-      garbage: 1,
-      other: 1
-    };
-    priorityScore += categoryPriorities[prediction.category] || 1;
-
-    // Factor 2: Urgency from text
-    if (text) {
-      const urgencyScore = this.calculateUrgencyScore(text.toLowerCase());
-      priorityScore += Math.min(urgencyScore, 3);
-    }
-
-    // Factor 3: Location factors (if near schools, hospitals, etc.)
-    if (metadata.nearCriticalInfrastructure) {
-      priorityScore += 2;
-    }
-
-    // Factor 4: Time factors (reported multiple times)
-    if (metadata.duplicateReports > 3) {
-      priorityScore += 1;
-    }
-
-    // Map score to priority level
-    if (priorityScore >= 7) return 'critical';
-    if (priorityScore >= 5) return 'high';
-    if (priorityScore >= 3) return 'medium';
+    if (boosted >= 9) return 'critical';
+    if (boosted >= 7) return 'high';
+    if (boosted >= 4) return 'medium';
     return 'low';
-  }
-
-  /**
-   * Batch classify multiple issues
-   */
-  async batchClassify(issues) {
-    const results = [];
-    
-    for (const issue of issues) {
-      const result = await this.classifyIssue(
-        issue.imageBuffer,
-        issue.text,
-        issue.metadata
-      );
-      results.push(result);
-    }
-    
-    return results;
-  }
-
-  /**
-   * Get classification confidence threshold
-   */
-  getConfidenceThreshold() {
-    return 0.7; // Issues below this confidence should be manually reviewed
-  }
-
-  /**
-   * Train model with new data (for future implementation)
-   */
-  async trainModel(trainingData) {
-    // Placeholder for model training logic
-    logger.info('Model training not yet implemented');
-    return {
-      success: false,
-      message: 'Training functionality coming soon'
-    };
-  }
-
-  /**
-   * Evaluate model performance
-   */
-  async evaluateModel(testData) {
-    // Placeholder for model evaluation
-    return {
-      accuracy: 0.85,
-      precision: 0.82,
-      recall: 0.88,
-      f1Score: 0.85
-    };
   }
 }
 
-// Export singleton instance
 module.exports = new ClassificationService();

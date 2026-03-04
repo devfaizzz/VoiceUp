@@ -3,271 +3,815 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VoiceUp- Admin Dashboard</title>
-    
-    <!-- Tailwind via local proxy to avoid CDN issues -->
+    <title>VoiceUp — Admin Dashboard</title>
+    <meta name="description" content="VoiceUp Admin Dashboard — Manage and review reported civic issues">
+
+    <!-- Tailwind via local proxy -->
     <script src="/assets/tailwind.js"></script>
-    
-    <!-- Google Maps API -->
-    <!-- Note: Replace YOUR_API_KEY with your actual Google Maps API key -->
-    
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    
-    <style>
-        #adminMap { height: 500px; width: 100%; }
-    </style>
+
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="css/admin.css">
+    <!-- Socket.io -->
+    <script src="/socket.io/socket.io.js"></script>
 </head>
-<body class="bg-gray-100">
-    <!-- Sidebar -->
-    <div class="flex h-screen">
-        <aside class="w-64 bg-gray-800 text-white">
-            <div class="p-4">
-                <h1 class="text-2xl font-bold mb-8">Admin Panel</h1>
-                <nav>
-                    <ul class="space-y-2">
-                        <li>
-                            <a href="#dashboard" class="block p-3 hover:bg-gray-700 rounded transition">
-                                📊 Dashboard
-                            </a>
-                        </li>
-                        <li>
-                            <a href="#issues" class="block p-3 hover:bg-gray-700 rounded transition">
-                                🎯 Issues
-                            </a>
-                        </li>
-                        <li>
-                            <a href="#map-view" class="block p-3 hover:bg-gray-700 rounded transition">
-                                🗺️ Map View
-                            </a>
-                        </li>
-                        <li>
-                            <a href="#departments" class="block p-3 hover:bg-gray-700 rounded transition">
-                                🏢 Departments
-                            </a>
-                        </li>
-                        <li>
-                            <a href="#analytics" class="block p-3 hover:bg-gray-700 rounded transition">
-                                📈 Analytics
-                            </a>
-                        </li>
-                        <li>
-                            <a href="#reports" class="block p-3 hover:bg-gray-700 rounded transition">
-                                📄 Reports
-                            </a>
-                        </li>
-                        <li>
-                            <a href="#settings" class="block p-3 hover:bg-gray-700 rounded transition">
-                                ⚙️ Settings
-                            </a>
-                        </li>
-                    </ul>
-                </nav>
+<body>
+
+<!-- ============================================
+     LOGIN OVERLAY
+     ============================================ -->
+<div id="adminLoginOverlay" class="login-overlay">
+    <div class="login-card">
+        <div style="text-align:center; margin-bottom: 32px;">
+            <div style="width:56px; height:56px; border-radius:16px; background:linear-gradient(135deg,#6366f1,#a855f7); display:flex; align-items:center; justify-content:center; margin:0 auto 16px; font-size:24px;">
+                🛡️
             </div>
-        </aside>
+            <h1>Admin Panel</h1>
+            <p>Sign in with your admin credentials</p>
+        </div>
+        <form id="adminLoginForm">
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="adminEmail" required placeholder="admin@voiceup.com">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="adminPassword" required placeholder="••••••••">
+            </div>
+            <button type="submit" id="adminLoginBtn" class="login-btn">Login</button>
+        </form>
+        <div id="adminMsg" class="login-msg hidden"></div>
+    </div>
+</div>
 
-        <!-- Main Content -->
-        <main class="flex-1 overflow-y-auto">
-            <!-- Header -->
-            <header class="bg-white shadow-md p-4">
-                <div class="flex justify-between items-center">
-                    <h2 class="text-2xl font-semibold text-gray-800">Dashboard Overview</h2>
-                    <div class="flex items-center space-x-4">
-                        <button class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
-                            Export Report
-                        </button>
-                        <span class="text-gray-600">Admin User</span>
+<!-- ============================================
+     DASHBOARD (hidden until authenticated)
+     ============================================ -->
+<div id="adminDashboard" class="hidden">
+<div class="admin-layout">
+
+    <!-- ---- SIDEBAR ---- -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <h1>Admin Panel</h1>
+            <p>Manage and review reports</p>
+        </div>
+
+        <nav class="sidebar-nav">
+            <a href="#" data-page="dashboard" class="active" onclick="showPage('dashboard', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                Dashboard
+            </a>
+            <a href="#" data-page="issues" onclick="showPage('issues', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                Issues
+            </a>
+            <a href="#" data-page="map-view" onclick="showPage('map-view', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                Map View
+            </a>
+            <a href="#" data-page="departments" onclick="showPage('departments', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                Departments
+            </a>
+            <a href="#" data-page="analytics" onclick="showPage('analytics', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                Analytics
+            </a>
+            <a href="#" data-page="reports" onclick="showPage('reports', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                Reports
+            </a>
+            <a href="#" data-page="settings" onclick="showPage('settings', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                Settings
+            </a>
+        </nav>
+
+        <!-- Decorative sidebar dots -->
+        <div class="sidebar-dots">
+            <span></span><span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span><span></span>
+        </div>
+    </aside>
+
+    <!-- ---- MAIN AREA ---- -->
+    <div class="main-area">
+
+        <!-- Top Header -->
+        <header class="top-header">
+            <div class="header-left">
+                <div>
+                    <div class="page-title" id="headerPageTitle">Dashboard</div>
+                    <div class="page-subtitle" id="headerPageSubtitle">Overview of all reported issues</div>
+                </div>
+            </div>
+
+            <div style="display:flex; align-items:center; gap:16px;">
+                <div class="header-search">
+                    <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="text" placeholder="Search issues..." id="globalSearch">
+                </div>
+
+                <div class="header-right">
+                    <button class="notification-btn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                        <span class="notification-badge">3</span>
+                    </button>
+
+                    <div class="user-profile" id="userProfileBtn">
+                        <div class="user-avatar" id="userAvatarText">SA</div>
+                        <div class="user-info">
+                            <div class="user-name" id="adminName">Super Admin</div>
+                            <div class="user-role">Administrator</div>
+                        </div>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
                     </div>
                 </div>
-            </header>
+            </div>
+        </header>
 
-            <!-- Dashboard Content -->
-            <div class="p-6">
-                <!-- Statistics Cards -->
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-                    <div class="bg-white rounded-lg shadow p-6">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-gray-500 text-sm">Total Issues</p>
-                                <p class="text-3xl font-bold text-gray-800">1,234</p>
-                                <p class="text-green-500 text-sm">↑ 12% from last month</p>
-                            </div>
-                            <div class="text-blue-500 text-3xl">📋</div>
-                        </div>
+        <!-- Content -->
+        <div class="content-area">
+
+            <!-- ============ DASHBOARD PAGE ============ -->
+            <div id="page-dashboard" class="page-section active">
+
+                <!-- Export Button -->
+                <div style="display:flex; justify-content:flex-end; margin-bottom:16px;">
+                    <button id="exportBtn" class="btn btn-primary" style="border-radius:50px;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Export Report
+                    </button>
+                </div>
+
+                <!-- Stat Cards -->
+                <div class="stats-grid">
+                    <div class="stat-card animate-in">
+                        <div class="stat-blob blue"></div>
+                        <div class="stat-icon blue">📋</div>
+                        <div class="stat-label">Total Issues</div>
+                        <div class="stat-value" id="statTotal">0</div>
+                        <div class="stat-sub blue">All reports →</div>
                     </div>
-                    
-                    <div class="bg-white rounded-lg shadow p-6">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-gray-500 text-sm">Pending Issues</p>
-                                <p class="text-3xl font-bold text-yellow-600">342</p>
-                                <p class="text-red-500 text-sm">↑ 5% from last week</p>
-                            </div>
-                            <div class="text-yellow-500 text-3xl">⏳</div>
-                        </div>
+                    <div class="stat-card animate-in">
+                        <div class="stat-blob amber"></div>
+                        <div class="stat-icon amber">⏳</div>
+                        <div class="stat-label">Pending Issues</div>
+                        <div class="stat-value" id="statPending">0</div>
+                        <div class="stat-sub amber">On hold</div>
                     </div>
-                    
-                    <div class="bg-white rounded-lg shadow p-6">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-gray-500 text-sm">Resolved Today</p>
-                                <p class="text-3xl font-bold text-green-600">28</p>
-                                <p class="text-green-500 text-sm">↑ 18% from yesterday</p>
-                            </div>
-                            <div class="text-green-500 text-3xl">✅</div>
-                        </div>
+                    <div class="stat-card animate-in">
+                        <div class="stat-blob green"></div>
+                        <div class="stat-icon green">✅</div>
+                        <div class="stat-label">Approved</div>
+                        <div class="stat-value" id="statApproved">0</div>
+                        <div class="stat-sub green">Resolved reports</div>
                     </div>
-                    
-                    <div class="bg-white rounded-lg shadow p-6">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-gray-500 text-sm">Avg Resolution Time</p>
-                                <p class="text-3xl font-bold text-gray-800">3.2d</p>
-                                <p class="text-green-500 text-sm">↓ 0.5d improvement</p>
-                            </div>
-                            <div class="text-purple-500 text-3xl">⏱️</div>
-                        </div>
+                    <div class="stat-card animate-in">
+                        <div class="stat-blob red"></div>
+                        <div class="stat-icon red">✕</div>
+                        <div class="stat-label">Rejected</div>
+                        <div class="stat-value" id="statRejected">0</div>
+                        <div class="stat-sub red">Rejected reports</div>
                     </div>
                 </div>
 
-                <!-- Issues Table & Filters -->
-                <div class="bg-white rounded-lg shadow mb-6">
-                    <div class="p-4 border-b">
-                        <div class="flex justify-between items-center">
-                            <h3 class="text-lg font-semibold">Recent Issues</h3>
-                            <div class="flex space-x-2">
-                                <select class="border rounded px-3 py-1">
-                                    <option>All Categories</option>
-                                    <option>Pothole</option>
-                                    <option>Street Light</option>
-                                    <option>Garbage</option>
-                                    <option>Water Supply</option>
-                                </select>
-                                <select class="border rounded px-3 py-1">
-                                    <option>All Status</option>
-                                    <option>New</option>
-                                    <option>In Progress</option>
-                                    <option>Resolved</option>
-                                </select>
-                                <select class="border rounded px-3 py-1">
-                                    <option>Priority</option>
-                                    <option>High</option>
-                                    <option>Medium</option>
-                                    <option>Low</option>
-                                </select>
-                            </div>
+                <!-- Recent Issues Table -->
+                <div class="glass-card">
+                    <div class="card-header">
+                        <h3>Recent Issues</h3>
+                        <div style="display:flex; gap:8px;">
+                            <select class="filter-select" id="dashCategoryFilter">
+                                <option>All Categories</option>
+                                <option value="pothole">Pothole</option>
+                                <option value="streetlight">Street Light</option>
+                                <option value="garbage">Garbage</option>
+                                <option value="water">Water Supply</option>
+                                <option value="sewage">Sewage</option>
+                                <option value="traffic">Traffic</option>
+                            </select>
+                            <select class="filter-select" id="dashStatusFilter">
+                                <option>All Status</option>
+                                <option value="new">New</option>
+                                <option value="hold">On Hold</option>
+                                <option value="approved">Approved</option>
+                                <option value="rejected">Rejected</option>
+                            </select>
+                            <select class="filter-select" id="dashPriorityFilter">
+                                <option>Priority</option>
+                                <option value="critical">Critical</option>
+                                <option value="high">High</option>
+                                <option value="medium">Medium</option>
+                                <option value="low">Low</option>
+                            </select>
                         </div>
                     </div>
-                    
-                    <div class="overflow-x-auto">
-                        <table class="w-full">
-                            <thead class="bg-gray-50">
+                    <div style="overflow-x:auto;">
+                        <table class="data-table">
+                            <thead>
                                 <tr>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Priority</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned To</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                    <th>ID</th>
+                                    <th>Category</th>
+                                    <th>Description</th>
+                                    <th>Location</th>
+                                    <th>Priority</th>
+                                    <th>Status</th>
+                                    <th>Assigned To</th>
+                                    <th>Actions</th>
                                 </tr>
                             </thead>
-                            <tbody class="bg-white divide-y divide-gray-200" id="issuesTableBody">
-                                <!-- Dynamic content will be loaded here -->
+                            <tbody id="issuesTableBody">
+                                <!-- Dynamic content -->
                             </tbody>
                         </table>
                     </div>
+                    <div class="pagination-bar" id="dashPagination">
+                        <!-- Pagination rendered by JS -->
+                    </div>
                 </div>
 
-                <!-- Map View -->
-                <div class="bg-white rounded-lg shadow mb-6">
-                    <div class="p-4 border-b">
-                        <h3 class="text-lg font-semibold">Live Issue Map</h3>
+                <!-- Saved Reports Section -->
+                <div class="glass-card">
+                    <div class="card-header">
+                        <h3>Saved Reports <span id="savedCount" style="font-size:13px; font-weight:400; color:var(--text-muted);">(0)</span></h3>
+                        <div style="display:flex; gap:8px;">
+                            <button id="filterAll" class="btn btn-sm btn-outline">All</button>
+                            <button id="filterApproved" class="btn btn-sm" style="background:var(--success-bg); color:var(--success); border:none;">Approved</button>
+                            <button id="filterRejected" class="btn btn-sm" style="background:var(--danger-bg); color:var(--danger); border:none;">Rejected</button>
+                        </div>
                     </div>
-                    <div id="adminMap"></div>
-                </div>
-
-                <!-- Analytics Charts -->
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                    <div class="bg-white rounded-lg shadow p-6">
-                        <h3 class="text-lg font-semibold mb-4">Issues by Category</h3>
-                        <canvas id="categoryChart"></canvas>
+                    <div style="overflow-x:auto;">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Category</th>
+                                    <th>Description</th>
+                                    <th>Location</th>
+                                    <th>Priority</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="savedTableBody">
+                                <!-- Saved reports will appear here -->
+                            </tbody>
+                        </table>
                     </div>
-                    
-                    <div class="bg-white rounded-lg shadow p-6">
-                        <h3 class="text-lg font-semibold mb-4">Resolution Trend</h3>
-                        <canvas id="trendChart"></canvas>
+                    <div id="savedEmpty" class="empty-state hidden">
+                        No saved reports yet. Approve or reject issues above.
                     </div>
                 </div>
 
                 <!-- Department Performance -->
-                <div class="bg-white rounded-lg shadow">
-                    <div class="p-4 border-b">
-                        <h3 class="text-lg font-semibold">Department Performance</h3>
+                <div class="glass-card">
+                    <div class="card-header">
+                        <h3>Department Performance</h3>
                     </div>
-                    <div class="p-4">
-                        <div class="space-y-4">
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center">
-                                    <span class="text-gray-600">Public Works</span>
-                                </div>
-                                <div class="flex items-center space-x-4">
-                                    <div class="w-48 bg-gray-200 rounded-full h-2">
-                                        <div class="bg-green-500 h-2 rounded-full" style="width: 78%"></div>
-                                    </div>
-                                    <span class="text-sm text-gray-600">78% resolved</span>
-                                </div>
+                    <div class="card-body">
+                        <div class="perf-row">
+                            <span class="perf-label">Public Works</span>
+                            <div class="perf-bar-container">
+                                <div class="perf-bar-bg"><div class="perf-bar green" style="width:78%"></div></div>
+                                <span class="perf-pct">78% resolved</span>
                             </div>
-                            
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center">
-                                    <span class="text-gray-600">Sanitation</span>
-                                </div>
-                                <div class="flex items-center space-x-4">
-                                    <div class="w-48 bg-gray-200 rounded-full h-2">
-                                        <div class="bg-yellow-500 h-2 rounded-full" style="width: 65%"></div>
-                                    </div>
-                                    <span class="text-sm text-gray-600">65% resolved</span>
-                                </div>
+                        </div>
+                        <div class="perf-row">
+                            <span class="perf-label">Sanitation</span>
+                            <div class="perf-bar-container">
+                                <div class="perf-bar-bg"><div class="perf-bar amber" style="width:65%"></div></div>
+                                <span class="perf-pct">65% resolved</span>
                             </div>
-                            
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center">
-                                    <span class="text-gray-600">Electrical</span>
-                                </div>
-                                <div class="flex items-center space-x-4">
-                                    <div class="w-48 bg-gray-200 rounded-full h-2">
-                                        <div class="bg-blue-500 h-2 rounded-full" style="width: 82%"></div>
-                                    </div>
-                                    <span class="text-sm text-gray-600">82% resolved</span>
-                                </div>
+                        </div>
+                        <div class="perf-row">
+                            <span class="perf-label">Electrical</span>
+                            <div class="perf-bar-container">
+                                <div class="perf-bar-bg"><div class="perf-bar blue" style="width:82%"></div></div>
+                                <span class="perf-pct">82% resolved</span>
+                            </div>
+                        </div>
+                        <div class="perf-row">
+                            <span class="perf-label">Water Supply</span>
+                            <div class="perf-bar-container">
+                                <div class="perf-bar-bg"><div class="perf-bar red" style="width:55%"></div></div>
+                                <span class="perf-pct">55% resolved</span>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
-        </main>
-    </div>
 
-    <!-- Issue Detail Modal -->
-    <div id="issueModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div class="bg-white rounded-lg p-6 max-w-2xl w-full max-h-screen overflow-y-auto">
-            <h3 class="text-xl font-semibold mb-4">Issue Details</h3>
-            <div id="issueModalContent">
-                <!-- Dynamic content -->
+            <!-- ============ ISSUES PAGE ============ -->
+            <div id="page-issues" class="page-section">
+                <!-- Filter toolbar -->
+                <div class="filter-toolbar">
+                    <div class="filter-search">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        <input type="text" placeholder="Search by ID, title, location..." id="issueSearchInput">
+                    </div>
+                    <select class="filter-select" id="issueCategoryFilter">
+                        <option value="">All Categories</option>
+                        <option value="pothole">Pothole</option>
+                        <option value="streetlight">Street Light</option>
+                        <option value="garbage">Garbage</option>
+                        <option value="water">Water Supply</option>
+                        <option value="sewage">Sewage</option>
+                        <option value="traffic">Traffic</option>
+                    </select>
+                    <select class="filter-select" id="issueStatusFilter">
+                        <option value="">All Status</option>
+                        <option value="new">New</option>
+                        <option value="hold">On Hold</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="approved">Approved</option>
+                        <option value="rejected">Rejected</option>
+                    </select>
+                    <select class="filter-select" id="issuePriorityFilter">
+                        <option value="">Priority</option>
+                        <option value="critical">Critical</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                    </select>
+                    <button class="btn btn-outline btn-sm" id="resetFiltersBtn">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                        Reset
+                    </button>
+                    <button class="btn btn-primary btn-sm" id="applyFiltersBtn">Apply</button>
+                </div>
+
+                <!-- Issue List Card -->
+                <div class="glass-card">
+                    <div class="card-header">
+                        <h3>Issue List</h3>
+                        <div style="display:flex; align-items:center; gap:12px;">
+                            <select class="filter-select" id="issueSortSelect" style="font-size:12px;">
+                                <option value="newest">Sort: Newest</option>
+                                <option value="oldest">Sort: Oldest</option>
+                                <option value="priority">Sort: Priority</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:40px;"><input type="checkbox" id="selectAllIssues"></th>
+                                    <th>ID</th>
+                                    <th>Category</th>
+                                    <th>Description</th>
+                                    <th>Location</th>
+                                    <th>Priority</th>
+                                    <th>Status</th>
+                                    <th>Assigned To</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="issuesPageTableBody">
+                                <!-- Dynamic content -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="pagination-bar" id="issuesPagination">
+                        <!-- Pagination rendered by JS -->
+                    </div>
+                </div>
             </div>
-            <div class="mt-4 flex justify-end space-x-2">
-                <button onclick="closeModal()" class="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400">Close</button>
-                <button class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">Update Status</button>
+
+            <!-- ============ MAP VIEW PAGE ============ -->
+            <div id="page-map-view" class="page-section">
+                <div class="glass-card">
+                    <div class="card-header">
+                        <h3>Live Issue Map</h3>
+                    </div>
+                    <div class="card-body" style="padding:0;">
+                        <div id="adminMap"></div>
+                    </div>
+                </div>
             </div>
+
+            <!-- ============ DEPARTMENTS PAGE ============ -->
+            <div id="page-departments" class="page-section">
+                <div style="margin-bottom:20px;">
+                    <div class="filter-toolbar" style="max-width:480px;">
+                        <div class="filter-search" style="flex:1;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            <input type="text" placeholder="Search departments...">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dept-grid">
+                    <div class="dept-card">
+                        <div class="dept-icon works">🏗️</div>
+                        <div class="dept-info">
+                            <h4>Public Works</h4>
+                            <div class="dept-count">12 Assigned Issues</div>
+                            <div class="dept-desc">Handles streetlights, road repairs, and other public infrastructure.</div>
+                        </div>
+                        <div class="dept-actions">
+                            <button class="btn btn-primary btn-sm">View</button>
+                            <button class="btn btn-outline btn-sm">Edit</button>
+                        </div>
+                    </div>
+
+                    <div class="dept-card">
+                        <div class="dept-icon parks">🌳</div>
+                        <div class="dept-info">
+                            <h4>Parks & Recreation</h4>
+                            <div class="dept-count">9 Assigned Issues</div>
+                            <div class="dept-desc">Manages parks, recreational facilities, and community events.</div>
+                        </div>
+                        <div class="dept-actions">
+                            <button class="btn btn-primary btn-sm">View</button>
+                            <button class="btn btn-outline btn-sm">Edit</button>
+                        </div>
+                    </div>
+
+                    <div class="dept-card">
+                        <div class="dept-icon env">🌊</div>
+                        <div class="dept-info">
+                            <h4>Environmental</h4>
+                            <div class="dept-count">7 Assigned Issues</div>
+                            <div class="dept-desc">Focuses on waste management, recycling, and environmental issues.</div>
+                        </div>
+                        <div class="dept-actions">
+                            <button class="btn btn-primary btn-sm">View</button>
+                            <button class="btn btn-outline btn-sm">Edit</button>
+                        </div>
+                    </div>
+
+                    <div class="dept-card">
+                        <div class="dept-icon transport">🚦</div>
+                        <div class="dept-info">
+                            <h4>Transportation</h4>
+                            <div class="dept-count">6 Assigned Issues</div>
+                            <div class="dept-desc">Handles traffic management, road safety, and public transit.</div>
+                        </div>
+                        <div class="dept-actions">
+                            <button class="btn btn-primary btn-sm">View</button>
+                            <button class="btn btn-outline btn-sm">Edit</button>
+                        </div>
+                    </div>
+
+                    <div class="dept-card">
+                        <div class="dept-icon health">🏥</div>
+                        <div class="dept-info">
+                            <h4>Health & Sanitation</h4>
+                            <div class="dept-count">5 Assigned Issues</div>
+                            <div class="dept-desc">Oversees public health, sanitation, and hygiene compliance.</div>
+                        </div>
+                        <div class="dept-actions">
+                            <button class="btn btn-primary btn-sm">View</button>
+                            <button class="btn btn-outline btn-sm">Edit</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ============ ANALYTICS PAGE ============ -->
+            <div id="page-analytics" class="page-section">
+                <!-- Mini stat row -->
+                <div class="stats-grid" style="grid-template-columns:repeat(4,1fr); margin-bottom:24px;">
+                    <div class="stat-card">
+                        <div class="stat-icon blue">📋</div>
+                        <div class="stat-value" id="analyticsTotal" style="font-size:28px;">0</div>
+                        <div class="stat-sub blue">Total Issues</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="analyticsApproved" style="font-size:28px; color:var(--success);">0</div>
+                        <div class="stat-sub green">Approved</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="analyticsRejected" style="font-size:28px; color:var(--danger);">0</div>
+                        <div class="stat-sub red">Rejected</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="analyticsHold" style="font-size:28px; color:var(--warning);">0</div>
+                        <div class="stat-sub amber">On Hold</div>
+                    </div>
+                </div>
+
+                <!-- Charts -->
+                <div class="charts-grid">
+                    <div class="glass-card">
+                        <div class="card-header"><h3>Issues Overview</h3></div>
+                        <div class="card-body chart-container">
+                            <canvas id="trendChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="glass-card">
+                        <div class="card-header"><h3>Categories Breakdown</h3></div>
+                        <div class="card-body chart-container">
+                            <canvas id="categoryChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ============ REPORTS PAGE ============ -->
+            <div id="page-reports" class="page-section">
+                <div class="filter-toolbar" style="margin-bottom:20px;">
+                    <select class="filter-select">
+                        <option>🏢 Departments</option>
+                        <option>Public Works</option>
+                        <option>Sanitation</option>
+                        <option>Electrical</option>
+                    </select>
+                    <select class="filter-select">
+                        <option>📁 Categories</option>
+                        <option>Pothole</option>
+                        <option>Street Light</option>
+                        <option>Garbage</option>
+                    </select>
+                    <select class="filter-select">
+                        <option>📅 Select Date</option>
+                        <option>Last 7 days</option>
+                        <option>Last 30 days</option>
+                        <option>Last 90 days</option>
+                    </select>
+                    <button class="btn btn-primary" style="border-radius:50px; margin-left:auto;" id="generateReportBtn">
+                        Generate Report
+                    </button>
+                </div>
+
+                <div class="glass-card">
+                    <div class="card-header">
+                        <h3>Generated Reports</h3>
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Report Title</th>
+                                    <th>Department</th>
+                                    <th>Date Generated</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="reportsTableBody">
+                                <!-- Reports rendered by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ============ SETTINGS PAGE ============ -->
+            <div id="page-settings" class="page-section">
+                <div class="glass-card">
+                    <div class="card-header"><h3>General Settings</h3></div>
+                    <div class="card-body">
+                        <div class="settings-section">
+                            <h4>Notifications</h4>
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label">Email Notifications</div>
+                                    <div class="setting-desc">Receive email alerts for new issues</div>
+                                </div>
+                                <label class="toggle">
+                                    <input type="checkbox" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label">Push Notifications</div>
+                                    <div class="setting-desc">Browser push notifications for urgent issues</div>
+                                </div>
+                                <label class="toggle">
+                                    <input type="checkbox" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h4>Display</h4>
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label">Default Page Size</div>
+                                    <div class="setting-desc">Number of items per page in tables</div>
+                                </div>
+                                <select class="filter-select" style="width:100px;">
+                                    <option>10</option>
+                                    <option>25</option>
+                                    <option>50</option>
+                                </select>
+                            </div>
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label">Auto-refresh Data</div>
+                                    <div class="setting-desc">Automatically refresh issue data every 5 minutes</div>
+                                </div>
+                                <label class="toggle">
+                                    <input type="checkbox">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h4>Account</h4>
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label">Account Email</div>
+                                    <div class="setting-desc" id="settingsEmail">admin@voiceup.com</div>
+                                </div>
+                                <button class="btn btn-outline btn-sm">Change</button>
+                            </div>
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label">Password</div>
+                                    <div class="setting-desc">Last changed 30 days ago</div>
+                                </div>
+                                <button class="btn btn-outline btn-sm">Update</button>
+                            </div>
+                            <div style="margin-top:24px;">
+                                <button class="btn btn-danger btn-sm" id="adminLogoutBtn">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                                    Logout
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /.content-area -->
+    </div><!-- /.main-area -->
+</div><!-- /.admin-layout -->
+
+<!-- Issue Detail Modal -->
+<div id="issueModal" class="modal-overlay">
+    <div class="modal-content">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h3 style="margin:0;">Issue Details</h3>
+            <button onclick="closeModal()" style="background:none; border:none; cursor:pointer; padding:4px; color:var(--text-muted);">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div id="issueModalContent">
+            <!-- Dynamic content -->
+        </div>
+        <div style="margin-top:24px; display:flex; justify-content:flex-end; gap:10px;">
+            <button onclick="closeModal()" class="btn btn-outline">Close</button>
+            <button class="btn btn-primary">Update Status</button>
         </div>
     </div>
+</div>
 
-    <!-- Google Maps API -->
-    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCwBbQyUgHCh6mK9xk2vmG-f-Y_yqkQ_bk&callback=initAdminMap" async defer></script>
-    
-    <!-- Admin Panel JavaScript -->
-    <script src="js/admin.js"></script>
+</div><!-- end #adminDashboard -->
+
+<!-- Google Maps API -->
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCwBbQyUgHCh6mK9xk2vmG-f-Y_yqkQ_bk&callback=initAdminMap" async defer></script>
+
+<!-- Navigation & Page Switching -->
+<script>
+    // Page titles map
+    const pageTitles = {
+        'dashboard': { title: 'Dashboard', subtitle: 'Overview of all reported issues' },
+        'issues': { title: 'Issues', subtitle: 'Manage and review reported issues' },
+        'map-view': { title: 'Map View', subtitle: 'Geographic view of all reports' },
+        'departments': { title: 'Departments', subtitle: 'Manage and organize departments' },
+        'analytics': { title: 'Analytics', subtitle: 'Track and analyze issue reports' },
+        'reports': { title: 'Reports', subtitle: 'Generate and export detailed reports' },
+        'settings': { title: 'Settings', subtitle: 'Configure admin panel preferences' }
+    };
+
+    function showPage(page, el) {
+        // Hide all pages
+        document.querySelectorAll('.page-section').forEach(p => p.classList.remove('active'));
+        // Show target
+        const target = document.getElementById('page-' + page);
+        if (target) target.classList.add('active');
+
+        // Update sidebar active
+        document.querySelectorAll('.sidebar-nav a').forEach(a => a.classList.remove('active'));
+        if (el) el.classList.add('active');
+
+        // Update header title
+        const info = pageTitles[page] || {};
+        document.getElementById('headerPageTitle').textContent = info.title || page;
+        document.getElementById('headerPageSubtitle').textContent = info.subtitle || '';
+
+        // Re-trigger animations
+        if (target) target.style.animation = 'none';
+        setTimeout(() => { if (target) target.style.animation = ''; }, 10);
+
+        // Trigger map resize if map page
+        if (page === 'map-view' && typeof google !== 'undefined' && adminMap) {
+            setTimeout(() => google.maps.event.trigger(adminMap, 'resize'), 200);
+        }
+
+        return false;
+    }
+
+    function closeModal() {
+        document.getElementById('issueModal').classList.remove('show');
+    }
+
+    function openModal() {
+        document.getElementById('issueModal').classList.add('show');
+    }
+</script>
+
+<!-- Admin Auth -->
+<script>
+    function getAdminToken() { return localStorage.getItem('voiceup_admin_token'); }
+    function getAdminUser() { try { return JSON.parse(localStorage.getItem('voiceup_admin_user')); } catch { return null; } }
+    function saveAdminAuth(data) {
+        localStorage.setItem('voiceup_admin_token', data.token);
+        localStorage.setItem('voiceup_admin_user', JSON.stringify(data.user));
+        if (data.refreshToken) localStorage.setItem('voiceup_admin_refresh', data.refreshToken);
+    }
+    function clearAdminAuth() {
+        localStorage.removeItem('voiceup_admin_token');
+        localStorage.removeItem('voiceup_admin_user');
+        localStorage.removeItem('voiceup_admin_refresh');
+    }
+
+    // Check if already authenticated
+    (function checkAdminAuth() {
+        const token = getAdminToken();
+        const user = getAdminUser();
+        if (token && user && user.role === 'admin') {
+            showDashboardUI(user);
+        }
+    })();
+
+    function showDashboardUI(user) {
+        document.getElementById('adminLoginOverlay').classList.add('hidden');
+        document.getElementById('adminDashboard').classList.remove('hidden');
+        const nameEl = document.getElementById('adminName');
+        const avatarEl = document.getElementById('userAvatarText');
+        if (nameEl) nameEl.textContent = user.name || 'Admin';
+        if (avatarEl) {
+            const initials = (user.name || 'A').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+            avatarEl.textContent = initials;
+        }
+    }
+
+    // Login form
+    document.getElementById('adminLoginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const msg = document.getElementById('adminMsg');
+        const btn = document.getElementById('adminLoginBtn');
+        msg.classList.add('hidden');
+        btn.disabled = true;
+        btn.textContent = 'Signing in...';
+
+        try {
+            const res = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: document.getElementById('adminEmail').value.trim(),
+                    password: document.getElementById('adminPassword').value
+                })
+            });
+            const data = await res.json();
+
+            if (res.ok && data.user.role === 'admin') {
+                saveAdminAuth(data);
+                showDashboardUI(data.user);
+            } else if (res.ok && data.user.role !== 'admin') {
+                msg.textContent = 'Access denied. Admin credentials required.';
+                msg.className = 'login-msg error';
+                btn.disabled = false;
+                btn.textContent = 'Login';
+            } else {
+                msg.textContent = data.message || 'Invalid credentials';
+                msg.className = 'login-msg error';
+                btn.disabled = false;
+                btn.textContent = 'Login';
+            }
+        } catch {
+            msg.textContent = 'Server error. Try again later.';
+            msg.className = 'login-msg error';
+            btn.disabled = false;
+            btn.textContent = 'Login';
+        }
+    });
+
+    // Logout
+    document.getElementById('adminLogoutBtn').addEventListener('click', () => {
+        clearAdminAuth();
+        document.getElementById('adminDashboard').classList.add('hidden');
+        document.getElementById('adminLoginOverlay').classList.remove('hidden');
+    });
+</script>
+
+<script src="js/admin.js"></script>
 </body>
 </html>
