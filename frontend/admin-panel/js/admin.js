@@ -10,6 +10,29 @@ function adminAuthHeader() {
   return t ? { 'Authorization': 'Bearer ' + t } : {};
 }
 
+function clearAdminAuth() {
+  localStorage.removeItem('voiceup_admin_token');
+}
+
+// ── Profile Dropdown Toggle ──
+function toggleAdminProfile(event) {
+  event.stopPropagation();
+  const dropdown = document.getElementById('adminProfDrop');
+  if (dropdown) {
+    dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
+  }
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+  const dropdown = document.getElementById('adminProfDrop');
+  if (dropdown && dropdown.style.display === 'block') {
+    if (!e.target.closest('.user-profile')) {
+      dropdown.style.display = 'none';
+    }
+  }
+});
+
 // All issues cache
 let allIssues = [];
 
@@ -354,10 +377,11 @@ function buildPendingRow(issue) {
     <td style="padding:14px 12px;">${statusBadge(issue.status)}</td>
     <td style="padding:14px 12px;">${assignedBadge(issue.assignedTo)}</td>
     <td style="padding:14px 12px;">
-      <div style="display:flex;gap:5px;">
+      <div style="display:flex;gap:5px;flex-wrap:wrap;">
         <button data-id="${issue._id}" data-status="approved" class="btn btn-success btn-sm" style="padding:4px 10px;font-size:11px;">Approve</button>
         <button data-id="${issue._id}" data-status="rejected" class="btn btn-danger btn-sm" style="padding:4px 10px;font-size:11px;">Reject</button>
         <button data-id="${issue._id}" data-status="hold" class="btn btn-warning btn-sm" style="padding:4px 10px;font-size:11px;">Hold</button>
+        <button onclick="openCommunicationModal('${issue._id}')" class="btn btn-primary btn-sm" style="padding:4px 10px;font-size:11px;background:#8B5CF6;border-color:#8B5CF6;">🤖 Draft PR</button>
       </div>
     </td>
   </tr>`;
@@ -374,10 +398,11 @@ function buildIssueRowFull(issue) {
     <td style="padding:14px 10px;">${statusBadge(issue.status)}</td>
     <td style="padding:14px 10px;">${assignedBadge(issue.assignedTo)}</td>
     <td style="padding:14px 10px;">
-      <div style="display:flex;gap:5px;">
-        <button data-id="${issue._id}" data-status="approved" class="btn btn-success btn-sm" style="padding:4px 10px;font-size:11px;">Approve</button>
+      <div style="display:flex;gap:5px;flex-wrap:wrap;">
+        <button onclick="openIssueResolver('${issue._id}')" class="btn btn-success btn-sm" style="padding:4px 10px;font-size:11px;">🔍 View / Resolve</button>
         <button data-id="${issue._id}" data-status="rejected" class="btn btn-danger btn-sm" style="padding:4px 10px;font-size:11px;">Reject</button>
         <button data-id="${issue._id}" data-status="hold" class="btn btn-warning btn-sm" style="padding:4px 10px;font-size:11px;">Hold</button>
+        <button onclick="openCommunicationModal('${issue._id}')" class="btn btn-primary btn-sm" style="padding:4px 10px;font-size:11px;background:#8B5CF6;border-color:#8B5CF6;">🤖 Draft PR</button>
       </div>
     </td>
   </tr>`;
@@ -386,6 +411,168 @@ function buildIssueRowFull(issue) {
 // ── Charts ──
 let trendChartInst = null;
 let catChartInst = null;
+
+// ── Feature 5: AI Communications ──
+window.openCommunicationModal = function (issueId) {
+  // Use a simple prompt/alert setup for this demo, or inject a modal if preferred.
+  // To keep it clean, we'll construct a quick modal on the fly.
+  const existing = document.getElementById('aiCommModal');
+  if (existing) existing.remove();
+
+  const modalHtml = `
+    <div id="aiCommModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; display:flex; align-items:center; justify-content:center;">
+      <div style="background:white; width:90%; max-width:500px; border-radius:12px; padding:24px; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
+        <h3 style="margin-top:0; font-size:1.25rem; display:flex; align-items:center; gap:8px;">🤖 Draft AI Response</h3>
+        <p style="color:#64748B; font-size:0.9rem; margin-bottom:16px;">Generate an official public relations statement or citizen update for this issue.</p>
+        
+        <label style="display:block; font-size:0.85rem; font-weight:600; margin-bottom:4px;">Tone</label>
+        <select id="aiCommTone" style="width:100%; padding:10px; border:1px solid #E2E8F0; border-radius:8px; margin-bottom:16px;">
+          <option value="professional">Professional & Official</option>
+          <option value="empathetic">Empathetic & Reassuring</option>
+          <option value="urgent">Urgent & Action-Oriented</option>
+        </select>
+
+        <label style="display:block; font-size:0.85rem; font-weight:600; margin-bottom:4px;">Additional Context (Optional)</label>
+        <input type="text" id="aiCommContext" placeholder="e.g. Teams dispatched, expected fix in 2 hours" style="width:100%; padding:10px; border:1px solid #E2E8F0; border-radius:8px; margin-bottom:16px;">
+
+        <div id="aiCommResult" style="display:none; background:#F8FAFC; padding:12px; border-radius:8px; border:1px solid #E2E8F0; font-size:0.9rem; color:#334155; margin-bottom:16px; white-space:pre-wrap; max-height:200px; overflow-y:auto;"></div>
+
+        <div style="display:flex; justify-content:flex-end; gap:12px;">
+          <button onclick="document.getElementById('aiCommModal').remove()" style="padding:10px 16px; border:none; background:none; cursor:pointer; color:#64748B; font-weight:600;">Close</button>
+          <button id="aiCommGenerateBtn" style="padding:10px 16px; border:none; background:#8B5CF6; color:white; border-radius:8px; cursor:pointer; font-weight:600;">Generate Draft</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+  document.getElementById('aiCommGenerateBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('aiCommGenerateBtn');
+    const resBox = document.getElementById('aiCommResult');
+    const tone = document.getElementById('aiCommTone').value;
+    const context = document.getElementById('aiCommContext').value;
+
+    btn.disabled = true;
+    btn.textContent = 'Generating...';
+    resBox.style.display = 'block';
+    resBox.textContent = 'Consulting AI...';
+
+    try {
+      const resp = await fetch('/api/communications/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...adminAuthHeader()
+        },
+        body: JSON.stringify({ issueId, tone, context })
+      });
+
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.message || 'Error generating');
+
+      resBox.textContent = data.draft;
+      btn.textContent = 'Regenerate';
+      btn.disabled = false;
+    } catch (e) {
+      resBox.textContent = 'Failed to generate: ' + e.message;
+      btn.textContent = 'Try Again';
+      btn.disabled = false;
+    }
+  });
+}
+
+window.openIssueResolver = async function (issueId) {
+  const existing = document.getElementById('aiResolverModal');
+  if (existing) existing.remove();
+
+  // Try to find in cache, otherwise fetch
+  let issue = allIssues.find(i => i._id === issueId);
+  if (!issue) {
+    try {
+      const resp = await fetch('/api/issues/' + issueId, { headers: adminAuthHeader() });
+      issue = await resp.json();
+    } catch (e) {
+      alert("Error fetching issue details");
+      return;
+    }
+  }
+
+  const aiReasonStr = issue.aiClassification?.reason || 'No AI reason provided';
+  const imgHtml = (issue.images && issue.images.length > 0)
+    ? `<img src="${issue.images[0].url}" style="width:100%; max-height:200px; object-fit:cover; border-radius:8px; margin-bottom:16px;">`
+    : `<div style="padding:20px; text-align:center; background:#F8FAFC; border-radius:8px; margin-bottom:16px; color:#94A3B8;">No Image Provided</div>`;
+
+  const modalHtml = `
+    <div id="aiResolverModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(2px);">
+      <div style="background:white; width:90%; max-width:600px; max-height:90vh; overflow-y:auto; border-radius:12px; padding:24px; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
+        <h3 style="margin-top:0; font-size:1.25rem;">Resolve Issue: ${issue.title || 'Untitled'}</h3>
+        <p style="color:#64748B; font-size:0.9rem; margin-bottom:16px;">${issue.location?.address || 'No location'}</p>
+        
+        ${imgHtml}
+
+        <div style="background:#F8FAFC; padding:12px; border:1px solid #E2E8F0; border-radius:8px; margin-bottom:20px;">
+          <h4 style="margin:0 0 4px 0; font-size:0.9rem;">🤖 AI Classification Reason:</h4>
+          <p style="margin:0; font-size:0.85rem; color:#475569;">${aiReasonStr}</p>
+        </div>
+
+        <h4 style="margin:0 0 12px 0;">Submit Resolution Proof</h4>
+        <form id="resolveForm" onsubmit="event.preventDefault(); submitResolution('${issue._id}');">
+          <label style="display:block; font-size:0.85rem; font-weight:600; margin-bottom:4px;">Upload 'After' Photo</label>
+          <input type="file" id="resolvePhoto" accept="image/*" style="width:100%; padding:8px; border:1px solid #E2E8F0; border-radius:8px; margin-bottom:16px;" required>
+
+          <label style="display:block; font-size:0.85rem; font-weight:600; margin-bottom:4px;">Resolution Notes / Action Taken</label>
+          <textarea id="resolveNotes" rows="3" style="width:100%; padding:10px; border:1px solid #E2E8F0; border-radius:8px; margin-bottom:16px;" placeholder="Describe what was done to fix this..." required></textarea>
+
+          <div style="display:flex; justify-content:flex-end; gap:12px;">
+            <button type="button" onclick="document.getElementById('aiResolverModal').remove()" style="padding:10px 16px; border:none; background:none; cursor:pointer; color:#64748B; font-weight:600;">Cancel</button>
+            <button type="submit" id="submitResolveBtn" style="padding:10px 16px; border:none; background:#10B981; color:white; border-radius:8px; cursor:pointer; font-weight:600;">✅ Upload & Resolve</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+window.submitResolution = async function (issueId) {
+  const btn = document.getElementById('submitResolveBtn');
+  const photoInput = document.getElementById('resolvePhoto');
+  const notesInput = document.getElementById('resolveNotes');
+
+  btn.disabled = true;
+  btn.textContent = 'Uploading...';
+
+  const formData = new FormData();
+  if (photoInput.files[0]) {
+    formData.append('resolutionImages', photoInput.files[0]);
+  }
+  formData.append('notes', notesInput.value || '');
+  formData.append('status', 'resolved');
+
+  try {
+    const res = await fetch(`/api/issues/${issueId}/resolve`, {
+      method: 'POST',
+      headers: {
+        'Authorization': adminAuthHeader().Authorization
+      },
+      body: formData
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.message || 'Failed to resolve');
+    }
+
+    alert("Issue successfully resolved with proof!");
+    document.getElementById('aiResolverModal').remove();
+    loadAll(); // refresh board
+  } catch (err) {
+    alert(err.message);
+    btn.disabled = false;
+    btn.textContent = '✅ Upload & Resolve';
+  }
+}
 
 function initCharts() {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -600,6 +787,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderIssuesPage();
     updateStats();
     renderReports();
+    loadTrustData();
 
     // Update notification badge count
     const badge = document.querySelector('.notification-badge');
@@ -609,6 +797,95 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (typeof loadIssuesOnMap === 'function') loadIssuesOnMap();
+  }
+
+  // ── Feature 4: Load Sentiment Data ──
+  async function loadSentimentData() {
+    const scoreEl = document.getElementById('sentScore');
+    const moodEl = document.getElementById('sentMood');
+    const summaryEl = document.getElementById('sentSummary');
+    const topicsEl = document.getElementById('sentTopicsList');
+    const misinfoEl = document.getElementById('sentMisinfoList');
+
+    if (!scoreEl) return;
+    scoreEl.textContent = '...';
+
+    try {
+      const res = await fetch('/api/sentiment/dashboard', { headers: adminAuthHeader() });
+      if (!res.ok) throw new Error('Failed to load');
+      const data = await res.json();
+
+      scoreEl.textContent = data.overallScore + '/100';
+      moodEl.textContent = data.sentiment;
+
+      // Color code mood
+      if (data.overallScore >= 70) moodEl.style.color = '#10B981';
+      else if (data.overallScore >= 40) moodEl.style.color = '#F59E0B';
+      else moodEl.style.color = '#EF4444';
+
+      summaryEl.textContent = data.summary;
+
+      // Topics
+      topicsEl.innerHTML = '';
+      if (data.trendingTopics && data.trendingTopics.length > 0) {
+        data.trendingTopics.forEach(t => {
+          const bg = t.volume > 75 ? '#EFF6FF' : (t.volume > 40 ? '#F8FAFC' : '#F8FAFC');
+          topicsEl.innerHTML += `
+          <div style="background:${bg}; padding:12px; border-radius:8px; display:flex; justify-content:space-between;">
+            <span style="font-weight:500; color:#334155;">#${t.topic}</span>
+            <span style="color:#64748B; font-size:0.9rem;">Vol: ${t.volume}%</span>
+          </div>
+        `;
+        });
+      } else {
+        topicsEl.innerHTML = '<div style="color:#94A3B8;">No trending topics detected.</div>';
+      }
+
+      // Misinfo
+      misinfoEl.innerHTML = '';
+      if (data.misinformationFlags && data.misinformationFlags.length > 0) {
+        data.misinformationFlags.forEach(m => {
+          const color = m.risk.toLowerCase() === 'high' ? '#EF4444' : (m.risk.toLowerCase() === 'medium' ? '#F59E0B' : '#10B981');
+          misinfoEl.innerHTML += `
+          <div style="border-left: 3px solid ${color}; background:#FEF2F2; padding:12px; border-radius:4px;">
+            <div style="font-weight:600; color:#1E293B; margin-bottom:4px;">Risk: ${m.risk}</div>
+            <div style="color:#64748B; font-size:0.9rem;">"${m.claim}"</div>
+          </div>
+        `;
+        });
+      } else {
+        misinfoEl.innerHTML = '<div style="color:#10B981;">No active misinformation detected. 🎉</div>';
+      }
+
+    } catch (err) {
+      console.error('Sentiment load error', err);
+      scoreEl.textContent = 'Error';
+      summaryEl.textContent = 'Failed to load AI sentiment data. Please check connection.';
+    }
+  }
+
+  // ── Feature 6: Load Trust Dashboard Data ──
+  async function loadTrustData() {
+    try {
+      const res = await fetch('/api/analytics/trust-dashboard', { headers: adminAuthHeader() });
+      if (!res.ok) throw new Error('Failed to load trust data');
+      const data = await res.json();
+
+      const setEl = (id, val) => { const e = document.getElementById(id); if (e) e.textContent = val; };
+
+      setEl('trustScoreVal', data.trustScore);
+      setEl('trustSpeedVal', data.avgResolutionDays);
+      setEl('trustRateVal', data.resolutionRate);
+
+      const lbl = document.getElementById('trustStatusLabel');
+      if (lbl) {
+        lbl.textContent = `Execution: ${data.executionLabel}`;
+        lbl.style.color = data.statusColor;
+      }
+
+    } catch (e) {
+      console.error('Trust Load error:', e);
+    }
   }
 
   window.loadAll = loadAll;
@@ -745,6 +1022,15 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('issueSearchInput')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { issuesCurrentPage = 1; renderIssuesPage(); }
   });
+
+  // Assuming showPage function exists elsewhere and handles page routing
+  // This block is inserted based on the instruction's context for showPage calls
+  function showPage(page) {
+    if (page === 'dashboard') loadAll();
+    if (page === 'reports') { issuesCurrentPage = 1; renderIssuesPage(); }
+    if (page === 'sentiment') loadSentimentData();
+    // Other page handling logic would go here
+  }
 
   // ── Select all ──
   document.getElementById('selectAllIssues')?.addEventListener('change', function () {

@@ -1,9 +1,13 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const { authenticateToken, authorize, optionalAuth } = require('../middleware/auth');
 const upload = require('../middleware/upload');
 const issueController = require('../controllers/issueController');
 const { validateIssue } = require('../middleware/validation');
+
+// Memory storage for audio transcription (we need raw buffer, not Cloudinary URL)
+const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 // Public routes
 router.get('/public', issueController.getPublicIssues);
@@ -20,6 +24,19 @@ router.post('/',
   ]),
   validateIssue,
   issueController.createIssue
+);
+
+// Voice transcription route (Groq Whisper STT — uses memory storage)
+router.post('/transcribe',
+  optionalAuth,
+  memUpload.single('audio'),
+  issueController.transcribeAudio
+);
+
+// AI Structuring route (extract structured data from raw text)
+router.post('/ai-structure',
+  optionalAuth,
+  issueController.structureIssueText
 );
 
 // Temporarily make status updates open for demo (will secure later)

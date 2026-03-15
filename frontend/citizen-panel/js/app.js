@@ -406,6 +406,51 @@ function openDetailModal(issue) {
     ? `📍 ${coords.lat.toFixed(4)}°N, ${coords.lng.toFixed(4)}°E`
     : '—';
 
+  // Feature 3: Before / After Verification Proof
+  const proofContainer = document.getElementById('verificationProofContainer');
+  if (proofContainer) proofContainer.remove(); // Clean up previous
+
+  if (isResolved && issue.resolution && issue.resolution.resolutionImages && issue.resolution.resolutionImages.length > 0) {
+    const defaultPlaceholder = 'https://placehold.co/400x300/f8fafc/94a3b8?text=No+Image';
+    const beforeImg = (issue.images && issue.images.length > 0) ? issue.images[0].url : defaultPlaceholder;
+    const afterImg = issue.resolution.resolutionImages[0].url;
+
+    // Create the Before/After card
+    const proofDiv = document.createElement('div');
+    proofDiv.id = 'verificationProofContainer';
+    proofDiv.style.cssText = 'margin-top: 20px; background: white; border-radius: 12px; padding: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);';
+    proofDiv.innerHTML = `
+      <h3 style="font-size: 1rem; font-weight: 600; color: #1E293B; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+        ✅ Issue Resolved — Visual Proof
+      </h3>
+      <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+        <div style="flex: 1;">
+          <div style="font-size: 0.75rem; font-weight: 600; color: #64748B; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Before</div>
+          <div style="height: 140px; border-radius: 8px; overflow: hidden; background: #F1F5F9; border: 1px solid #E2E8F0;">
+            <img src="${beforeImg}" style="width: 100%; height: 100%; object-fit: cover;" alt="Before">
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; color: #94A3B8;">→</div>
+        <div style="flex: 1;">
+          <div style="font-size: 0.75rem; font-weight: 600; color: #10B981; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">After (Verified)</div>
+          <div style="height: 140px; border-radius: 8px; overflow: hidden; background: #ECFDF5; border: 2px solid #34D399;">
+            <img src="${afterImg}" style="width: 100%; height: 100%; object-fit: cover;" alt="After">
+          </div>
+        </div>
+      </div>
+      <div style="font-size: 0.85rem; color: #64748B; background: #F8FAFC; padding: 8px 12px; border-radius: 6px; border-left: 3px solid #6366F1;">
+        "${issue.resolution.resolutionNotes || 'Issue has been successfully resolved.'}"<br>
+        <span style="font-size: 0.7rem; color: #94A3B8; margin-top: 4px; display: block;">Verified on ${fmtDate(issue.resolution.resolvedAt)}</span>
+      </div>
+    `;
+
+    // Insert after the mini map container
+    const mmContainer = document.querySelector('.mini-map-card');
+    if (mmContainer) {
+      mmContainer.insertAdjacentElement('afterend', proofDiv);
+    }
+  }
+
   buildFeed(issue);
   overlay.classList.add('open');
 
@@ -711,25 +756,134 @@ document.addEventListener('DOMContentLoaded', () => {
     );
   });
 
-  // Voice recording
+  // Voice recording + Groq Whisper STT
   let mediaRecorder, audioChunks = [];
+  let isRecording = false;
   const startBtn = document.getElementById('startRecord');
   const stopBtn = document.getElementById('stopRecord');
   const audio = document.getElementById('audioPlayback');
+
   startBtn?.addEventListener('click', async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioChunks = [];
-      mediaRecorder = new MediaRecorder(stream);
-      mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-      mediaRecorder.onstop = () => { audio.src = URL.createObjectURL(new Blob(audioChunks, { type: 'audio/webm' })); audio.style.display = 'block'; audio.load(); };
-      mediaRecorder.start();
-      startBtn.style.display = 'none'; stopBtn.style.display = 'flex';
-    } catch (e) { showToast('Microphone error: ' + e.message, 'error'); }
+      mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+
+      mediaRecorder.ondataavailable = e => {
+        if (e.data && e.data.size > 0) audioChunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        // Stop all tracks to release mic
+        stream.getTracks().forEach(t => t.stop());
+
+        const blob = new Blob(audioChunks, { type: 'audio/webm' });
+        if (blob.size < 100) {
+          showToast('Recording too short. Try again.', 'error');
+          return;
+        }
+
+        // Show playback
+        audio.src = URL.createObjectURL(blob);
+        audio.style.display = 'block';
+        audio.load();
+
+        // Send to Whisper for transcription
+        startBtn.textContent = '🤖 Transcribing…';
+        startBtn.disabled = true;
+        try {
+          const formData = new FormData();
+          formData.append('audio', blob, 'recording.webm');
+
+          const res = await fetch('/api/issues/transcribe', {
+            method: 'POST',
+            headers: authHeader(),
+            body: formData
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            const transcript = (data.text || '').trim();
+            if (transcript) {
+              // Auto-fill description initially
+              const titleEl = document.getElementById('title');
+              const descEl = document.getElementById('description');
+              const catEl = document.getElementById('category'); // Ensure your HTML has an element with ID 'category' or similar category selection
+
+              if (descEl) {
+                descEl.value = transcript;
+                const cc = document.getElementById('charCount');
+                if (cc) cc.textContent = transcript.length;
+              }
+
+              startBtn.textContent = '🤖 Structuring details...';
+
+              // Call the AI structure endpoint
+              try {
+                const structRes = await fetch('/api/issues/ai-structure', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', ...authHeader() },
+                  body: JSON.stringify({ rawText: transcript })
+                });
+
+                if (structRes.ok) {
+                  const structuredData = await structRes.json();
+
+                  if (titleEl) titleEl.value = structuredData.title;
+                  if (descEl) descEl.value = structuredData.description;
+
+                  // Try to select category if it matches the radio buttons/select
+                  if (structuredData.category) {
+                    const catBtn = document.querySelector(`.cat-btn[data-val="${structuredData.category.toLowerCase()}"]`);
+                    if (catBtn) {
+                      document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+                      catBtn.classList.add('active');
+                      if (catEl) catEl.value = structuredData.category.toLowerCase();
+                    }
+                  }
+
+                  showToast(`🤖 AI formatted your report!`, 'success');
+                } else {
+                  showToast(`🎙️ Voice transcribed (AI structurer failed)`, 'success');
+                }
+              } catch (e) {
+                console.error("Structurer error", e);
+                showToast(`🎙️ Voice transcribed!`, 'success');
+              }
+
+            } else {
+              showToast('Could not understand audio. Try again.', 'error');
+            }
+          } else {
+            const err = await res.json().catch(() => ({}));
+            showToast(err.message || 'Transcription failed.', 'error');
+          }
+        } catch (e) {
+          showToast('Network error during transcription.', 'error');
+          console.error('Transcribe error:', e);
+        } finally {
+          startBtn.textContent = '🎙️ Tap to Record';
+          startBtn.disabled = false;
+        }
+      };
+
+      mediaRecorder.start(250); // collect data every 250ms
+      isRecording = true;
+      startBtn.style.display = 'none';
+      stopBtn.style.display = 'flex';
+      showToast('🎙️ Recording… Speak now!', 'success');
+    } catch (e) {
+      showToast('Microphone error: ' + e.message, 'error');
+    }
   });
+
   stopBtn?.addEventListener('click', () => {
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
-    stopBtn.style.display = 'none'; startBtn.style.display = 'flex';
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+      isRecording = false;
+    }
+    stopBtn.style.display = 'none';
+    startBtn.style.display = 'flex';
   });
 
   // Form submit
@@ -760,6 +914,32 @@ document.addEventListener('DOMContentLoaded', () => {
       const json = await res.json();
       if (res.ok) {
         showToast(`✅ Report submitted! AI Priority: ${json.priority || 'medium'}`, 'success');
+
+        // Show AI reason alert if available
+        if (json.aiReason) {
+          const priorityClass = json.priority === 'critical' ? 'critical' : json.priority === 'high' ? 'high' : 'medium';
+          const modalHtml = `
+            <div id="aiReasonModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.8); z-index:9999; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+              <div style="background:#1E293B; border: 1px solid rgba(139, 92, 246, 0.4); border-radius:16px; width:90%; max-width:400px; padding:24px; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,0.5); animation: scaleIn 0.3s ease;">
+                <div style="font-size:3rem; margin-bottom:12px;">🤖</div>
+                <h3 style="color:white; margin:0 0 8px 0; font-size:1.2rem;">AI Classification Complete</h3>
+                <div style="display:inline-block; padding:4px 12px; border-radius:50px; font-size:0.85rem; font-weight:700; margin-bottom:16px; text-transform:uppercase;" class="priority-badge ${priorityClass}">${json.priority} Priority</div>
+                <p style="color:#94A3B8; font-size:0.95rem; line-height:1.5; margin-bottom:24px; text-align:left; background:rgba(0,0,0,0.2); padding:16px; border-radius:8px;">${json.aiReason}</p>
+                <button id="aiReasonGotItBtn" style="background:#8B5CF6; color:white; border:none; padding:12px 24px; border-radius:8px; font-weight:600; width:100%; cursor:pointer;">Got it</button>
+              </div>
+            </div>
+          `;
+          document.body.insertAdjacentHTML('beforeend', modalHtml);
+          document.getElementById('aiReasonGotItBtn').addEventListener('click', () => {
+            document.getElementById('aiReasonModal').remove();
+            loadMyReports();
+            const reportsTab = document.querySelector('[data-page=reports]') || document.querySelectorAll('.bottom-nav a')[1];
+            if (reportsTab) reportsTab.click();
+          });
+        } else {
+          setTimeout(() => { loadMyReports(); showPage('reports', document.querySelector('[data-page=reports]') || document.querySelectorAll('.bottom-nav a')[1]); }, 100);
+        }
+
         form.reset();
         document.getElementById('charCount').textContent = '0';
         document.getElementById('previewImg').style.display = 'none';
@@ -768,7 +948,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (marker) { marker.setMap(null); marker = null; }
         document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
         document.querySelector('.cat-btn')?.classList.add('active');
-        loadMyReports();
       } else { showToast(json.message || 'Failed to submit report', 'error'); }
     } catch { showToast('Network error. Please try again.', 'error'); }
     finally { btn.disabled = false; btn.textContent = 'Submit Report'; showLoader(false); }

@@ -86,6 +86,7 @@ const createIssue = async (req, res) => {
         category,
         confidence: ai.severity / 10,
         suggestedPriority: ai.priority,
+        reason: ai.aiReason,
         processedAt: new Date()
       }
     });
@@ -230,7 +231,54 @@ const updatePriority = async (req, res) => {
 };
 
 const resolveIssue = async (req, res) => {
-  return res.status(200).json({ id: req.params.id, message: 'Issue resolved (stub)' });
+  try {
+    const issue = await Issue.findById(req.params.id);
+    if (!issue) return res.status(404).json({ message: 'Issue not found' });
+
+    issue.status = 'resolved';
+
+    // Process uploaded resolution images 
+    const resolutionImages = [];
+    if (req.files && req.files.length > 0) {
+      req.files.forEach(file => {
+        resolutionImages.push({
+          url: file.path,
+          publicId: file.filename || file.public_id
+        });
+      });
+    }
+
+    issue.resolution = {
+      resolvedAt: new Date(),
+      resolvedBy: req.user?._id || req.user?.id || null,
+      resolutionNotes: req.body.resolutionNotes || 'Resolved by admin',
+      resolutionImages
+    };
+
+    // If report has reporter, award coins 
+    if (issue.reportedBy && issue.status !== 'resolved') {
+      await awardCoins(issue.reportedBy, issue, 'resolved');
+      await User.findByIdAndUpdate(issue.reportedBy, {
+        $inc: { 'statistics.resolvedReports': 1 }
+      });
+    }
+
+    await issue.save();
+
+    // Trigger realtime updates
+    if (issue.reportedBy) {
+      req.app.get('io').to(`user-${issue.reportedBy}`).emit('issue:status', {
+        id: issue._id, status: issue.status,
+        coinsAwarded: COIN_REWARDS['resolved'] || 0
+      });
+    }
+    req.app.get('io').emit('issue:updated', { id: issue._id, status: issue.status });
+
+    return res.status(200).json({ id: issue._id, message: 'Issue resolved successfully', issue });
+  } catch (err) {
+    console.error('Resolve issue error:', err);
+    return res.status(500).json({ message: 'Failed to resolve issue' });
+  }
 };
 
 const getCategoryDistribution = async (req, res) => {
@@ -253,11 +301,46 @@ const batchUpdateStatus = async (req, res) => {
   return res.status(200).json({ updated: 0 });
 };
 
+// ─── Voice Transcription (Groq Whisper) ──────────────────────────────────────
+const transcribeAudio = async (req, res) => {
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ message: 'No audio file provided' });
+    }
+
+    const result = await classifier.transcribe(req.file.buffer, req.file.originalname || 'audio.webm');
+    return res.status(200).json({ text: result.text });
+  } catch (err) {
+    console.error('Transcription error:', err);
+    return res.status(500).json({ message: 'Transcription failed: ' + err.message });
+  }
+};
+
+// ─── AI Structuring ──────────────────────────────────────────────────────────
+const structureIssueText = async (req, res) => {
+  try {
+    const { rawText, imageBase64 } = req.body;
+    if (!rawText) return res.status(400).json({ message: 'No text provided' });
+
+    let imageBuffer = null;
+    if (imageBase64) {
+      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+      imageBuffer = Buffer.from(base64Data, 'base64');
+    }
+
+    const structured = await classifier.structureInput(rawText, imageBuffer);
+    return res.status(200).json(structured);
+  } catch (err) {
+    console.error('Structurer error:', err);
+    return res.status(500).json({ message: 'Structuring failed' });
+  }
+};
+
 module.exports = {
   getPublicIssues, getPublicIssueById, getNearbyIssues, getIssueStatistics,
   createIssue, getMyIssues, getIssueById, updateIssue, deleteIssue,
   addComment, toggleUpvote, submitFeedback, updateIssueStatus, sendReminder,
   assignIssue, updatePriority, resolveIssue,
   getCategoryDistribution, getResolutionTimeStats, getIssueHeatmap,
-  batchClassifyIssues, batchUpdateStatus
+  batchClassifyIssues, batchUpdateStatus, transcribeAudio, structureIssueText
 };

@@ -86,8 +86,12 @@
                 Analytics
             </a>
             <a href="#" data-page="reports" onclick="showPage('reports', this)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                <span class="nav-icon">📄</span>
                 Reports
+            </a>
+            <a href="#" data-page="sentiment" onclick="showPage('sentiment', this)">
+                <span class="nav-icon">🧠</span>
+                Sentiment Analysis
             </a>
             <a href="#" data-page="settings" onclick="showPage('settings', this)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -128,13 +132,19 @@
                         <span class="notification-badge">3</span>
                     </button>
 
-                    <div class="user-profile" id="userProfileBtn">
+                    <div class="user-profile" onclick="toggleAdminProfile(event)">
                         <div class="user-avatar" id="userAvatarText">SA</div>
                         <div class="user-info">
                             <div class="user-name" id="adminName">Super Admin</div>
                             <div class="user-role">Administrator</div>
                         </div>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+                        <!-- Admin Profile Dropdown (Logout Feature) -->
+                        <div id="adminProfDrop" style="position:absolute; top:50px; right:0; background:white; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); padding:8px; z-index:100; min-width:120px; display:none;" class="admin-dropdown">
+                            <button onclick="clearAdminAuth(); window.location.reload();" style="width:100%; text-align:left; background:none; border:none; padding:8px 12px; color:#EF4444; font-weight:500; cursor:pointer;">
+                                🚪 Logout
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -149,9 +159,39 @@
                 <!-- Export Button -->
                 <div style="display:flex; justify-content:flex-end; margin-bottom:16px;">
                     <button id="exportBtn" class="btn btn-primary" style="border-radius:50px;">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                         Export Report
                     </button>
+                </div>
+
+                <!-- Feature 6: Trust & Execution Bar -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 24px;">
+                  <div style="background: linear-gradient(135deg, #1E293B, #0F172A); color: white; border-radius: 16px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    <div style="font-size: 0.85rem; color: #94A3B8; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">District Trust Score</div>
+                    <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 8px;">
+                      <div id="trustScoreVal" style="font-size: 2.5rem; font-weight: 800; line-height: 1;">--</div>
+                      <div style="font-size: 1.25rem; color: #64748B;">/ 100</div>
+                    </div>
+                    <div id="trustStatusLabel" style="margin-top: 8px; font-size: 0.9rem; font-weight: 500; color: #34D399;">Loading...</div>
+                  </div>
+                  
+                  <div style="background: white; border-radius: 16px; padding: 20px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="font-size: 0.85rem; color: #64748B; font-weight: 600;">Avg. Resolution Speed</div>
+                    <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 8px;">
+                      <div id="trustSpeedVal" style="font-size: 2rem; font-weight: 700; color: #1E293B;">--</div>
+                      <div style="font-size: 1rem; color: #64748B;">Days</div>
+                    </div>
+                    <div style="margin-top: 8px; font-size: 0.85rem; color: #94A3B8;">Last 30 days</div>
+                  </div>
+
+                  <div style="background: white; border-radius: 16px; padding: 20px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="font-size: 0.85rem; color: #64748B; font-weight: 600;">Resolution Rate</div>
+                    <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 8px;">
+                      <div id="trustRateVal" style="font-size: 2rem; font-weight: 700; color: #1E293B;">--</div>
+                      <div style="font-size: 1rem; color: #64748B;">%</div>
+                    </div>
+                    <div style="margin-top: 8px; font-size: 0.85rem; color: #94A3B8;">All time</div>
+                  </div>
                 </div>
 
                 <!-- Stat Cards -->

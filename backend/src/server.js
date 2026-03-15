@@ -18,6 +18,8 @@ const adminRoutes = require('./routes/admin.routes');
 const userRoutes = require('./routes/user.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
+const sentimentRoutes = require('./routes/sentiment.routes');
+const communicationRoutes = require('./routes/communication.routes');
 
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
@@ -167,6 +169,8 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/sentiment', sentimentRoutes);
+app.use('/api/communications', communicationRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
