@@ -132,19 +132,19 @@
                         <span class="notification-badge">3</span>
                     </button>
 
-                    <div class="user-profile" onclick="toggleAdminProfile(event)">
+                    <button type="button" class="user-profile" id="userProfileBtn">
                         <div class="user-avatar" id="userAvatarText">SA</div>
                         <div class="user-info">
                             <div class="user-name" id="adminName">Super Admin</div>
                             <div class="user-role">Administrator</div>
                         </div>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
-                        <!-- Admin Profile Dropdown (Logout Feature) -->
-                        <div id="adminProfDrop" style="position:absolute; top:50px; right:0; background:white; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); padding:8px; z-index:100; min-width:120px; display:none;" class="admin-dropdown">
-                            <button onclick="clearAdminAuth(); window.location.reload();" style="width:100%; text-align:left; background:none; border:none; padding:8px 12px; color:#EF4444; font-weight:500; cursor:pointer;">
-                                🚪 Logout
-                            </button>
-                        </div>
+                    </button>
+                    <!-- Admin Profile Dropdown (Logout Feature) - moved outside button -->
+                    <div id="adminProfDrop" class="admin-dropdown">
+                        <button type="button" id="adminLogoutDropdownBtn">
+                            🚪 Logout
+                        </button>
                     </div>
                 </div>
             </div>

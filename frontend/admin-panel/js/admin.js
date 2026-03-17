@@ -15,23 +15,50 @@ function clearAdminAuth() {
 }
 
 // ── Profile Dropdown Toggle ──
-function toggleAdminProfile(event) {
-  event.stopPropagation();
+function setupAdminProfileDropdown() {
+  const profileBtn = document.getElementById('userProfileBtn');
   const dropdown = document.getElementById('adminProfDrop');
-  if (dropdown) {
-    dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
+  const logoutBtn = document.getElementById('adminLogoutDropdownBtn');
+  
+  console.log('Setting up admin dropdown:', { profileBtn: !!profileBtn, dropdown: !!dropdown, logoutBtn: !!logoutBtn });
+  
+  if (!profileBtn || !dropdown) {
+    console.warn('Admin dropdown setup failed - missing elements');
+    return;
   }
+  
+  // Toggle dropdown on profile button click
+  profileBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    dropdown.classList.toggle('show');
+    console.log('Admin dropdown toggled, now has show class:', dropdown.classList.contains('show'));
+  });
+  
+  // Handle logout button click
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      clearAdminAuth();
+      window.location.href = '/admin';
+    });
+  }
+  
+  // Close dropdown when clicking outside
+  document.addEventListener('click', (e) => {
+    if (dropdown.classList.contains('show')) {
+      if (!e.target.closest('.header-right')) {
+        dropdown.classList.remove('show');
+      }
+    }
+  });
 }
 
-// Close dropdown when clicking outside
-document.addEventListener('click', (e) => {
-  const dropdown = document.getElementById('adminProfDrop');
-  if (dropdown && dropdown.style.display === 'block') {
-    if (!e.target.closest('.user-profile')) {
-      dropdown.style.display = 'none';
-    }
-  }
-});
+// Initialize on DOM ready or immediately if already loaded
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', setupAdminProfileDropdown);
+} else {
+  setupAdminProfileDropdown();
+}
 
 // All issues cache
 let allIssues = [];

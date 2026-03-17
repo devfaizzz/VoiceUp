@@ -397,6 +397,7 @@ body {
   background: rgba(255, 255, 255, 0.45);
   backdrop-filter: blur(20px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+  overflow: visible;
 }
 
 .header-left {
@@ -452,6 +453,7 @@ body {
 }
 
 .header-right {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 20px;
@@ -495,6 +497,7 @@ body {
 }
 
 .user-profile {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -503,9 +506,57 @@ body {
   background: rgba(255, 255, 255, 0.6);
   cursor: pointer;
   transition: var(--transition-fast);
+  border: none;
+  font-family: inherit;
+  outline: none;
 }
 
 .user-profile:hover { background: #fff; box-shadow: var(--shadow-sm); }
+.user-profile:focus { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+.admin-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 6px;
+  z-index: 9999;
+  min-width: 160px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+  pointer-events: none;
+}
+
+.admin-dropdown.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.admin-dropdown button {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 10px 14px;
+  color: #ef4444;
+  font-weight: 500;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.admin-dropdown button:hover {
+  background: rgba(239, 68, 68, 0.08);
+}
 
 .user-avatar {
   width: 36px;
