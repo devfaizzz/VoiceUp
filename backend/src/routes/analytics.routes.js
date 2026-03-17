@@ -1,14 +1,15 @@
 const express = require('express');
 const router = express.Router();
 
-const { authorize } = require('../middleware/auth');
+const { authenticateToken, authorize } = require('../middleware/auth');
 const analyticsService = require('../services/analyticsService');
 
 router.get('/health', (req, res) => {
   return res.status(200).json({ status: 'ok' });
 });
 
-router.get('/trust-dashboard', authorize(['admin', 'staff']), async (req, res) => {
+// Apply authentication to protected analytics routes
+router.get('/trust-dashboard', authenticateToken, authorize(['admin', 'staff']), async (req, res) => {
   try {
     const data = await analyticsService.getTrustDashboardData();
     return res.status(200).json(data);
