@@ -287,18 +287,19 @@ router.post('/bid/:bidId/accept', async (req, res) => {
 
     // Update issue
     const issue = await Issue.findById(bid.issue);
-    issue.contractorAssignment = {
-      ...issue.contractorAssignment,
-      status: 'bid_accepted',
-      acceptedBid: bid._id,
-      acceptedContractor: bid.contractor._id,
-      acceptedAt: new Date()
-    };
+    if (!issue.contractorAssignment) issue.contractorAssignment = {};
+    issue.contractorAssignment.status = 'bid_accepted';
+    issue.contractorAssignment.acceptedBid = bid._id;
+    issue.contractorAssignment.acceptedContractor = bid.contractor._id;
+    issue.contractorAssignment.acceptedAt = new Date();
     await issue.save();
 
     // Update contractor statistics
     const contractor = await Contractor.findById(bid.contractor._id);
-    contractor.statistics.acceptedBids += 1;
+    if (!contractor.statistics) {
+       contractor.statistics = { totalBids: 0, acceptedBids: 0, completedProjects: 0, averageRating: 0, totalRatings: 0 };
+    }
+    contractor.statistics.acceptedBids = (contractor.statistics.acceptedBids || 0) + 1;
     await contractor.save();
 
     // Emit socket event to the specific contractor's room + admins

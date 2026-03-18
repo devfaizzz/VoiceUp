@@ -62,10 +62,8 @@ const issueSchema = new mongoose.Schema({
     required: false
   },
   assignedTo: {
-    department: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Department'
-    },
+    department: String,
+    name: String,
     staff: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'

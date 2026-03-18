@@ -137,9 +137,12 @@ async function loadDashboardStats() {
                 tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No recent activity</td></tr>';
             }
 
-            // Check for accepted bids
+            // Check for active projects
             if (data.stats.activeProjects > 0) {
-                showCongratsBanner();
+                if (!sessionStorage.getItem('congratsShown')) {
+                    showCongratsBanner();
+                    sessionStorage.setItem('congratsShown', 'true');
+                }
             }
         }
     } catch (error) {

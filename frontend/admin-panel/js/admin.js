@@ -19,21 +19,21 @@ function setupAdminProfileDropdown() {
   const profileBtn = document.getElementById('userProfileBtn');
   const dropdown = document.getElementById('adminProfDrop');
   const logoutBtn = document.getElementById('adminLogoutDropdownBtn');
-  
+
   console.log('Setting up admin dropdown:', { profileBtn: !!profileBtn, dropdown: !!dropdown, logoutBtn: !!logoutBtn });
-  
+
   if (!profileBtn || !dropdown) {
     console.warn('Admin dropdown setup failed - missing elements');
     return;
   }
-  
+
   // Toggle dropdown on profile button click
   profileBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     dropdown.classList.toggle('show');
     console.log('Admin dropdown toggled, now has show class:', dropdown.classList.contains('show'));
   });
-  
+
   // Handle logout button click
   if (logoutBtn) {
     logoutBtn.addEventListener('click', (e) => {
@@ -42,7 +42,7 @@ function setupAdminProfileDropdown() {
       window.location.href = '/admin';
     });
   }
-  
+
   // Close dropdown when clicking outside
   document.addEventListener('click', (e) => {
     if (dropdown.classList.contains('show')) {
@@ -72,7 +72,7 @@ let issuesCurrentPage = 1;
 let socket;
 function initAdminSocket() {
   socket = io();
-  
+
   // Join admin room on connect
   socket.on('connect', () => {
     socket.emit('join-admin-room');
@@ -272,16 +272,16 @@ function exportCSV() {
   const a = document.createElement('a');
   a.style.display = 'none';
   a.href = url;
-  
+
   // Use setAttribute for robust filename assignment
   const filename = `voiceup_report_${new Date().toISOString().slice(0, 10)}.csv`;
   a.setAttribute('download', filename);
   a.download = filename;
-  
+
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  
+
   // Give browser 500ms to register download intent
   setTimeout(() => URL.revokeObjectURL(url), 500);
 }
@@ -415,7 +415,7 @@ function assignedBadge(assignedTo, issueId) {
   </div>`;
 }
 
-window.toggleAssignDropdown = function(triggerBtn) {
+window.toggleAssignDropdown = function (triggerBtn) {
   const wrap = triggerBtn.closest('.assigned-dropdown-wrap');
   if (!wrap) return;
   const panel = wrap.querySelector('.assigned-dropdown-panel');
@@ -463,7 +463,7 @@ window.toggleAssignDropdown = function(triggerBtn) {
     }
 
     // Close on next click (defer so this click doesn't close immediately)
-    setTimeout(function() {
+    setTimeout(function () {
       function closeHandler(e) {
         if (!wrap.contains(e.target) && !portal.contains(e.target)) {
           panel.classList.remove('open');
@@ -494,7 +494,7 @@ function cleanupAssignPortals() {
   document.querySelectorAll('.assigned-dropdown-trigger[aria-expanded="true"]').forEach(b => b.setAttribute('aria-expanded', 'false'));
 }
 
-window.selectAssignment = async function(itemBtn) {
+window.selectAssignment = async function (itemBtn) {
   const issueId = itemBtn.getAttribute('data-issue-id');
   const assignId = itemBtn.getAttribute('data-assign-id');
   const assignName = itemBtn.getAttribute('data-assign-name');
@@ -1266,31 +1266,31 @@ document.addEventListener('DOMContentLoaded', () => {
 // ══════════════════════════════════════════════════════════════════
 
 // Fix Modal Functions
-window.openFixModal = function() {
+window.openFixModal = function () {
   const modal = document.getElementById('fixIssueModal');
   const loading = document.getElementById('fixModalLoading');
   const success = document.getElementById('fixModalSuccess');
   const error = document.getElementById('fixModalError');
-  
+
   // Reset to loading state
   loading.style.display = 'block';
   success.style.display = 'none';
   error.style.display = 'none';
-  
+
   modal.classList.add('show');
 };
 
-window.closeFixModal = function() {
+window.closeFixModal = function () {
   document.getElementById('fixIssueModal').classList.remove('show');
 };
 
-window.updateFixModalSuccess = function() {
+window.updateFixModalSuccess = function () {
   document.getElementById('fixModalLoading').style.display = 'none';
   document.getElementById('fixModalSuccess').style.display = 'block';
   document.getElementById('fixModalError').style.display = 'none';
 };
 
-window.updateFixModalError = function(message) {
+window.updateFixModalError = function (message) {
   document.getElementById('fixModalLoading').style.display = 'none';
   document.getElementById('fixModalSuccess').style.display = 'none';
   document.getElementById('fixModalError').style.display = 'block';
@@ -1298,7 +1298,7 @@ window.updateFixModalError = function(message) {
 };
 
 // Send issue to contractors (Fix button)
-window.sendToContractors = async function(issueId) {
+window.sendToContractors = async function (issueId) {
   // Show loading modal
   openFixModal();
 
@@ -1322,7 +1322,7 @@ window.sendToContractors = async function(issueId) {
 };
 
 // Open bids modal for an issue
-window.openBidsModal = async function(issueId) {
+window.openBidsModal = async function (issueId) {
   const modal = document.getElementById('bidsModal');
   const issueInfo = document.getElementById('bidsModalIssueInfo');
   const content = document.getElementById('bidsModalContent');
@@ -1422,12 +1422,12 @@ window.openBidsModal = async function(issueId) {
 };
 
 // Close bids modal
-window.closeBidsModal = function() {
+window.closeBidsModal = function () {
   document.getElementById('bidsModal').classList.remove('show');
 };
 
 // Accept a bid
-window.acceptBid = async function(bidId) {
+window.acceptBid = async function (bidId) {
   if (!confirm('Accept this bid? This will reject all other bids for this issue.')) return;
 
   try {
@@ -1476,7 +1476,7 @@ function showAdminToast(message, type = 'info') {
 // REPORT DETAIL & AI CONTRACTOR ASSIGNMENT FLOW
 // ══════════════════════════════════════════════════════════════════
 
-window.handleRowClick = function(e, issueId) {
+window.handleRowClick = function (e, issueId) {
   // Ignore clicks on buttons, inputs, links, or custom assignment dropdowns
   const ignored = ['BUTTON', 'INPUT', 'A', 'SELECT'];
   if (ignored.includes(e.target.tagName)) return;
@@ -1485,7 +1485,7 @@ window.handleRowClick = function(e, issueId) {
 };
 
 // Open Report Detail Modal
-window.openReportDetail = async function(issueId) {
+window.openReportDetail = async function (issueId) {
   const modal = document.getElementById('reportDetailModal');
   const body = document.getElementById('rdBody');
   const title = document.getElementById('rdTitle');
@@ -1562,12 +1562,12 @@ window.openReportDetail = async function(issueId) {
   }
 };
 
-window.closeReportDetail = function() {
+window.closeReportDetail = function () {
   document.getElementById('reportDetailModal').style.display = 'none';
 };
 
 // ── AI Contractor Recommendation Flow ──
-window.triggerAiRecommend = async function(issueId) {
+window.triggerAiRecommend = async function (issueId) {
   // Close report detail, open AI modal
   closeReportDetail();
   const modal = document.getElementById('aiRecommendModal');
@@ -1639,12 +1639,12 @@ window.triggerAiRecommend = async function(issueId) {
   }
 };
 
-window.closeAiRecommend = function() {
+window.closeAiRecommend = function () {
   document.getElementById('aiRecommendModal').style.display = 'none';
 };
 
 // ── Completion View ──
-window.openCompletionView = async function(issueId) {
+window.openCompletionView = async function (issueId) {
   const modal = document.getElementById('completionViewModal');
   const body = document.getElementById('completionViewBody');
   modal.style.display = 'flex';
@@ -1691,16 +1691,16 @@ window.openCompletionView = async function(issueId) {
         <div class="compare-col">
           <h4 style="color:#ef4444;">📷 Before</h4>
           ${proof.beforeImages && proof.beforeImages.length > 0
-            ? proof.beforeImages.map(img => `<img src="${img.url}" alt="Before" style="margin-bottom:8px;" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22150%22><rect fill=%22%23f1f5f9%22 width=%22200%22 height=%22150%22/><text fill=%22%2394a3b8%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22>No Image</text></svg>'">`).join('')
-            : '<div style="padding:40px;background:#f8fafc;border-radius:10px;color:#94a3b8;">No before image</div>'
-          }
+        ? proof.beforeImages.map(img => `<img src="${img.url}" alt="Before" style="margin-bottom:8px;" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22150%22><rect fill=%22%23f1f5f9%22 width=%22200%22 height=%22150%22/><text fill=%22%2394a3b8%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22>No Image</text></svg>'">`).join('')
+        : '<div style="padding:40px;background:#f8fafc;border-radius:10px;color:#94a3b8;">No before image</div>'
+      }
         </div>
         <div class="compare-col">
           <h4 style="color:#10b981;">📷 After</h4>
           ${proof.afterImages && proof.afterImages.length > 0
-            ? proof.afterImages.map(img => `<img src="${img.url}" alt="After" style="margin-bottom:8px;" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22150%22><rect fill=%22%23f0fdf4%22 width=%22200%22 height=%22150%22/><text fill=%22%2394a3b8%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22>No Image</text></svg>'">`).join('')
-            : '<div style="padding:40px;background:#f0fdf4;border-radius:10px;color:#94a3b8;">No after image</div>'
-          }
+        ? proof.afterImages.map(img => `<img src="${img.url}" alt="After" style="margin-bottom:8px;" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22150%22><rect fill=%22%23f0fdf4%22 width=%22200%22 height=%22150%22/><text fill=%22%2394a3b8%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22>No Image</text></svg>'">`).join('')
+        : '<div style="padding:40px;background:#f0fdf4;border-radius:10px;color:#94a3b8;">No after image</div>'
+      }
         </div>
       </div>
 
@@ -1724,11 +1724,11 @@ window.openCompletionView = async function(issueId) {
   }
 };
 
-window.closeCompletionView = function() {
+window.closeCompletionView = function () {
   document.getElementById('completionViewModal').style.display = 'none';
 };
 
-window.approvePaymentFromView = async function(bidId) {
+window.approvePaymentFromView = async function (bidId) {
   if (!confirm('Approve payment for this completed work?')) return;
   try {
     const res = await fetch(`/api/admin/bid/${bidId}/approve-payment`, {
