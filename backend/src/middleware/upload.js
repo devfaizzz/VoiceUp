@@ -57,7 +57,7 @@ if (provider === 's3') {
         folder: `civic-issue-tracker/${folder}`,
         resource_type,
         public_id: `${Date.now()}-${file.originalname.replace(/\s+/g, '-')}`,
-        allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'mp3', 'wav', 'm4a']
+        allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif', 'svg', 'mp3', 'wav', 'm4a']
       };
     }
   });

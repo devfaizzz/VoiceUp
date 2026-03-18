@@ -1014,7 +1014,114 @@ body {
 .cat-badge.sewage { background: rgba(107, 114, 128, 0.1); color: #4b5563; }
 .cat-badge.traffic { background: rgba(168, 85, 247, 0.1); color: #7c3aed; }
 
-/* Assigned badge */
+/* Assigned badge & dropdown */
+.assigned-dropdown-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.assigned-dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  margin: -4px -8px;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  transition: background-color 0.2s ease;
+}
+
+.assigned-dropdown-trigger:hover {
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--primary);
+}
+
+.assigned-dropdown-trigger .assigned-chevron {
+  margin-left: 2px;
+  opacity: 0.6;
+  transition: transform 0.2s ease;
+}
+
+.assigned-dropdown-trigger[aria-expanded="true"] .assigned-chevron {
+  transform: rotate(180deg);
+}
+
+.assigned-dropdown-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  min-width: 180px;
+  background: #fff;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  z-index: 100;
+  padding: 6px;
+  display: none;
+}
+
+.assigned-dropdown-panel.open {
+  display: block;
+  animation: fadeIn 0.15s ease;
+}
+
+.assigned-dropdown-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: none;
+  background: none;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  transition: background-color 0.15s ease;
+}
+
+.assigned-dropdown-item:hover {
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--primary);
+}
+
+/* Portal dropdown (rendered in body to avoid overflow clipping) */
+.assigned-dropdown-portal .assigned-dropdown-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: none;
+  background: none;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  transition: background-color 0.15s ease;
+}
+
+.assigned-dropdown-portal .assigned-dropdown-item:hover {
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--primary);
+}
+
+/* Fade-in animation for dropdown panel and portal */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.assigned-dropdown-portal {
+  animation: fadeIn 0.15s ease;
+}
+
 .assigned-badge {
   display: inline-flex;
   align-items: center;
@@ -1034,6 +1141,7 @@ body {
   justify-content: center;
   font-size: 10px;
   font-weight: 700;
+  flex-shrink: 0;
 }
 
 .assigned-avatar.unassigned {
@@ -1608,4 +1716,78 @@ body {
 .action-menu button.danger:hover {
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+/* ============================================
+   FIX ISSUE MODAL
+   ============================================ */
+.fix-modal-spinner {
+  width: 56px;
+  height: 56px;
+  border: 4px solid rgba(99, 102, 241, 0.15);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  margin: 0 auto;
+  animation: fixModalSpin 1s linear infinite;
+}
+
+@keyframes fixModalSpin {
+  to { transform: rotate(360deg); }
+}
+
+.fix-modal-success-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--success), #059669);
+  color: white;
+  font-size: 28px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  animation: fixModalPop 0.3s ease;
+}
+
+.fix-modal-error-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--danger), #dc2626);
+  color: white;
+  font-size: 28px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  animation: fixModalPop 0.3s ease;
+}
+
+@keyframes fixModalPop {
+  0% { transform: scale(0); }
+  70% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
+/* ============================================
+   CLICKABLE ISSUE ROWS
+   ============================================ */
+.issue-row-clickable {
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.issue-row-clickable:hover {
+  background: rgba(99, 102, 241, 0.04);
+}
+
+.issue-row-clickable:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.issue-row-clickable:active {
+  background: rgba(99, 102, 241, 0.08);
 }
