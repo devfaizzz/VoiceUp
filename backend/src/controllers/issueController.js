@@ -47,7 +47,13 @@ const getPublicIssues = async (req, res) => {
 };
 
 const getPublicIssueById = async (req, res) => {
-  return res.status(200).json({ id: req.params.id, issue: null });
+  try {
+    const issue = await Issue.findById(req.params.id).lean();
+    if (!issue) return res.status(404).json({ message: 'Issue not found' });
+    return res.status(200).json(issue); // Return issue object directly to match contractor.js expectations
+  } catch {
+    return res.status(404).json({ message: 'Issue not found' });
+  }
 };
 
 const getNearbyIssues = async (req, res) => {
@@ -223,7 +229,27 @@ const sendReminder = async (req, res) => {
 };
 
 const assignIssue = async (req, res) => {
-  return res.status(200).json({ id: req.params.id, assignee: req.body.assignee || null });
+  try {
+    const issue = await Issue.findById(req.params.id);
+    if (!issue) return res.status(404).json({ message: 'Issue not found' });
+    
+    // Assign department
+    if (req.body.assignee) {
+      issue.assignedTo = {
+        department: req.body.assignee.department,
+        name: req.body.assignee.name,
+        assignedAt: new Date()
+      };
+    } else {
+      issue.assignedTo = null;
+    }
+    
+    await issue.save();
+    return res.status(200).json({ id: issue._id, assignee: issue.assignedTo });
+  } catch (err) {
+    console.error('assignIssue error:', err);
+    return res.status(500).json({ message: 'Failed to assign issue' });
+  }
 };
 
 const updatePriority = async (req, res) => {

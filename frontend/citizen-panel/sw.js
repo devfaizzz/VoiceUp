@@ -28,6 +28,22 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Bypass Service Worker for blob:, data:, and other non-http requests.
+  // This is critical to prevent the SW from stripping the 'download' filename attribute from blob downloads.
+  if (!event.request.url.startsWith('http')) {
+    return;
+  }
+
+  const url = new URL(event.request.url);
+
+  // Bypass cache completely for API, admin panel, and contractor panel
+  if (url.pathname.startsWith('/api/') || 
+      url.pathname.startsWith('/admin') || 
+      url.pathname.startsWith('/contractor')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
   // Always go network-first for HTML pages to ensure auth guards work
   if (event.request.mode === 'navigate') {
     event.respondWith(
@@ -35,6 +51,7 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
+
   event.respondWith(
     caches.match(event.request).then((response) => {
       return response || fetch(event.request);

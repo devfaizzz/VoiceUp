@@ -19,21 +19,21 @@ function setupAdminProfileDropdown() {
   const profileBtn = document.getElementById('userProfileBtn');
   const dropdown = document.getElementById('adminProfDrop');
   const logoutBtn = document.getElementById('adminLogoutDropdownBtn');
-  
+
   console.log('Setting up admin dropdown:', { profileBtn: !!profileBtn, dropdown: !!dropdown, logoutBtn: !!logoutBtn });
-  
+
   if (!profileBtn || !dropdown) {
     console.warn('Admin dropdown setup failed - missing elements');
     return;
   }
-  
+
   // Toggle dropdown on profile button click
   profileBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     dropdown.classList.toggle('show');
     console.log('Admin dropdown toggled, now has show class:', dropdown.classList.contains('show'));
   });
-  
+
   // Handle logout button click
   if (logoutBtn) {
     logoutBtn.addEventListener('click', (e) => {
@@ -42,7 +42,7 @@ function setupAdminProfileDropdown() {
       window.location.href = '/admin';
     });
   }
-  
+
   // Close dropdown when clicking outside
   document.addEventListener('click', (e) => {
     if (dropdown.classList.contains('show')) {
@@ -72,6 +72,12 @@ let issuesCurrentPage = 1;
 let socket;
 function initAdminSocket() {
   socket = io();
+
+  // Join admin room on connect
+  socket.on('connect', () => {
+    socket.emit('join-admin-room');
+  });
+
   socket.on('admin:reminder', data => {
     // Show a modern notification/alert
     const toast = document.createElement('div');
@@ -103,6 +109,43 @@ function initAdminSocket() {
   });
 
   socket.on('issue:updated', () => loadAll());
+
+  // New bid received notification
+  socket.on('bid:new', (data) => {
+    const toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed; top:24px; right:24px; background:white; padding:16px 20px; border-radius:12px; box-shadow:0 10px 25px rgba(0,0,0,0.1); border-left:4px solid #6366f1; z-index:9999; display:flex; gap:12px; align-items:center; animation: slideIn 0.3s ease-out;';
+    toast.innerHTML = `
+      <div style="font-size:24px;">🏗️</div>
+      <div>
+        <div style="font-weight:700; color:var(--text-main); margin-bottom:2px;">New Bid Received!</div>
+        <div style="font-size:13px; color:var(--text-muted);">${data.contractorName} bid ₹${data.bidAmount?.toLocaleString()} for ${data.completionDays} days</div>
+      </div>
+    `;
+    document.body.appendChild(toast);
+    setTimeout(() => {
+      toast.style.animation = 'fadeOut 0.3s ease-in forwards';
+      setTimeout(() => toast.remove(), 300);
+    }, 5000);
+  });
+
+  // Work completed notification
+  socket.on('work:completed', (data) => {
+    const toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed; top:24px; right:24px; background:white; padding:16px 20px; border-radius:12px; box-shadow:0 10px 25px rgba(0,0,0,0.1); border-left:4px solid #10b981; z-index:9999; display:flex; gap:12px; align-items:center; animation: slideIn 0.3s ease-out;';
+    toast.innerHTML = `
+      <div style="font-size:24px;">✅</div>
+      <div>
+        <div style="font-weight:700; color:var(--text-main); margin-bottom:2px;">Work Completed!</div>
+        <div style="font-size:13px; color:var(--text-muted);">${data.contractorName} has submitted work completion proof</div>
+      </div>
+    `;
+    document.body.appendChild(toast);
+    setTimeout(() => {
+      toast.style.animation = 'fadeOut 0.3s ease-in forwards';
+      setTimeout(() => toast.remove(), 300);
+    }, 5000);
+    loadAll();
+  });
 }
 
 // ── Page Navigation ──
@@ -227,13 +270,20 @@ function exportCSV() {
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
+  a.style.display = 'none';
   a.href = url;
-  // Original filename format restored
-  a.download = 'voiceup_report_' + new Date().toISOString().slice(0, 10) + '.csv';
+
+  // Use setAttribute for robust filename assignment
+  const filename = `voiceup_report_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.setAttribute('download', filename);
+  a.download = filename;
+
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+
+  // Give browser 500ms to register download intent
+  setTimeout(() => URL.revokeObjectURL(url), 500);
 }
 
 // ── Google Maps ──
@@ -333,11 +383,162 @@ function categoryBadge(category) {
   return `<span class="cat-badge ${cat}">${icons[cat] || '📌'} ${category || 'Other'}</span>`;
 }
 
-function assignedBadge(assignedTo) {
-  if (!assignedTo?.name) return `<span class="assigned-badge"><span class="assigned-avatar unassigned">—</span>Unassigned</span>`;
-  const initials = assignedTo.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
-  return `<span class="assigned-badge"><span class="assigned-avatar">${initials}</span>${assignedTo.name}</span>`;
+// Department options for assignment dropdown (matches departments page)
+const ASSIGNMENT_OPTIONS = [
+  { id: null, name: 'Unassigned' },
+  { id: 'public-works', name: 'Public Works' },
+  { id: 'parks-recreation', name: 'Parks & Recreation' },
+  { id: 'environmental', name: 'Environmental' },
+  { id: 'transportation', name: 'Transportation' },
+  { id: 'health-sanitation', name: 'Health & Sanitation' }
+];
+
+function assignedBadge(assignedTo, issueId) {
+  const displayName = assignedTo?.name || (assignedTo?.department ? 'Department' : null) || null;
+  const isUnassigned = !displayName;
+  const initials = displayName ? displayName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) : '—';
+  const label = displayName || 'Unassigned';
+
+  return `<div class="assigned-dropdown-wrap" onclick="event.stopPropagation();">
+    <button type="button" class="assigned-dropdown-trigger assigned-badge" aria-haspopup="true" aria-expanded="false" aria-label="Assign issue" data-issue-id="${issueId || ''}" onclick="event.stopPropagation(); toggleAssignDropdown(this)">
+      <span class="assigned-avatar ${isUnassigned ? 'unassigned' : ''}">${initials}</span>
+      <span class="assigned-label">${label}</span>
+      <svg class="assigned-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <div class="assigned-dropdown-panel" id="assign-dropdown-${issueId || ''}" role="menu">
+      ${ASSIGNMENT_OPTIONS.map(opt => `
+        <button type="button" role="menuitem" class="assigned-dropdown-item" data-issue-id="${issueId || ''}" data-assign-id="${opt.id || ''}" data-assign-name="${(opt.name || '').replace(/"/g, '&quot;')}" onclick="event.stopPropagation(); selectAssignment(this)">
+          ${opt.id ? opt.name : '— Unassigned'}
+        </button>
+      `).join('')}
+    </div>
+  </div>`;
 }
+
+window.toggleAssignDropdown = function (triggerBtn) {
+  const wrap = triggerBtn.closest('.assigned-dropdown-wrap');
+  if (!wrap) return;
+  const panel = wrap.querySelector('.assigned-dropdown-panel');
+  const isOpen = panel.classList.contains('open');
+
+  // Close any other open assignment dropdowns
+  document.querySelectorAll('.assigned-dropdown-panel.open').forEach(p => {
+    if (p !== panel) {
+      p.classList.remove('open');
+      if (p._assignPortal && p._assignPortal.parentNode) p._assignPortal.parentNode.removeChild(p._assignPortal);
+    }
+  });
+  document.querySelectorAll('.assigned-dropdown-trigger[aria-expanded="true"]').forEach(b => {
+    if (b !== triggerBtn) b.setAttribute('aria-expanded', 'false');
+  });
+
+  if (isOpen) {
+    panel.classList.remove('open');
+    triggerBtn.setAttribute('aria-expanded', 'false');
+    if (panel._assignPortal && panel._assignPortal.parentNode) {
+      panel._assignPortal.parentNode.removeChild(panel._assignPortal);
+    }
+  } else {
+    panel.classList.add('open');
+    triggerBtn.setAttribute('aria-expanded', 'true');
+
+    // Move dropdown to body and position below trigger (avoids overflow clipping)
+    const rect = triggerBtn.getBoundingClientRect();
+    let portal = panel._assignPortal;
+    if (!portal) {
+      portal = document.createElement('div');
+      portal.className = 'assigned-dropdown-portal';
+      portal.innerHTML = panel.innerHTML;
+      portal.style.cssText = 'position:fixed;z-index:9999;min-width:180px;background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.15);border:1px solid rgba(0,0,0,0.08);padding:6px;';
+      portal.style.left = rect.left + 'px';
+      portal.style.top = (rect.bottom + 4) + 'px';
+      document.body.appendChild(portal);
+      panel._assignPortal = portal;
+      portal._originTrigger = triggerBtn;
+      portal._originPanel = panel;
+    } else {
+      portal.style.left = rect.left + 'px';
+      portal.style.top = (rect.bottom + 4) + 'px';
+      document.body.appendChild(portal);
+    }
+
+    // Close on next click (defer so this click doesn't close immediately)
+    setTimeout(function () {
+      function closeHandler(e) {
+        if (!wrap.contains(e.target) && !portal.contains(e.target)) {
+          panel.classList.remove('open');
+          triggerBtn.setAttribute('aria-expanded', 'false');
+          if (portal.parentNode) portal.remove();
+          document.removeEventListener('click', closeHandler);
+          window.removeEventListener('scroll', scrollCloseHandler, true);
+        }
+      }
+      document.addEventListener('click', closeHandler);
+    }, 0);
+
+    // Close on scroll of any container (capture phase catches inner div scroll too)
+    function scrollCloseHandler() {
+      panel.classList.remove('open');
+      triggerBtn.setAttribute('aria-expanded', 'false');
+      if (portal.parentNode) portal.remove();
+      window.removeEventListener('scroll', scrollCloseHandler, true);
+    }
+    window.addEventListener('scroll', scrollCloseHandler, true);
+  }
+};
+
+// Clean up any orphaned assignment dropdown portals (called before table re-renders)
+function cleanupAssignPortals() {
+  document.querySelectorAll('.assigned-dropdown-portal').forEach(p => p.remove());
+  document.querySelectorAll('.assigned-dropdown-panel.open').forEach(p => p.classList.remove('open'));
+  document.querySelectorAll('.assigned-dropdown-trigger[aria-expanded="true"]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+}
+
+window.selectAssignment = async function (itemBtn) {
+  const issueId = itemBtn.getAttribute('data-issue-id');
+  const assignId = itemBtn.getAttribute('data-assign-id');
+  const assignName = itemBtn.getAttribute('data-assign-name');
+
+  // Use portal reference to find the correct trigger
+  // (avoids querySelector matching wrong trigger when issue appears in both tables)
+  const portalEl = itemBtn.closest('.assigned-dropdown-portal');
+  let trigger;
+  if (portalEl && portalEl._originTrigger) {
+    trigger = portalEl._originTrigger;
+  } else {
+    trigger = document.querySelector(`.assigned-dropdown-trigger[data-issue-id="${issueId}"]`);
+  }
+
+  const wrap = trigger ? trigger.closest('.assigned-dropdown-wrap') : null;
+  const panel = wrap ? wrap.querySelector('.assigned-dropdown-panel') : null;
+  const labelEl = wrap ? wrap.querySelector('.assigned-label') : null;
+  const avatarEl = wrap ? wrap.querySelector('.assigned-avatar') : null;
+
+  if (panel) panel.classList.remove('open');
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+
+  // Remove all portals (clean up any orphans)
+  cleanupAssignPortals();
+
+  if (labelEl) {
+    labelEl.textContent = assignName || 'Unassigned';
+  }
+  if (avatarEl) {
+    avatarEl.classList.toggle('unassigned', !assignId);
+    avatarEl.textContent = assignId ? (assignName || ' ').charAt(0) : '—';
+  }
+
+  try {
+    await fetch(`/api/issues/${issueId}/assign`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...adminAuthHeader() },
+      body: JSON.stringify({ assignee: assignId ? { department: assignId, name: assignName } : null })
+    });
+    if (typeof loadAll === 'function') loadAll();
+  } catch (e) {
+    console.error('Assign failed', e);
+  }
+};
 
 function locationCell(issue) {
   const coords = issue.location?.coordinates;
@@ -395,41 +596,53 @@ window.goToIssuesPage = function (page) { issuesCurrentPage = page; renderIssues
 
 // ── Row Builders ──
 function buildPendingRow(issue) {
-  return `<tr>
+  const contractorStatus = issue.contractorAssignment?.status || 'none';
+  const showAssignBtn = issue.status === 'approved' && contractorStatus === 'none';
+  const showBidsBtn = ['sent_to_contractors', 'bidding_open', 'bid_accepted'].includes(contractorStatus);
+
+  return `<tr class="issue-row-clickable" onclick="handleRowClick(event, '${issue._id}')" tabindex="0" role="button" aria-label="View issue details">
     <td class="cell-id" style="padding:14px 16px;">${issue._id.slice(-8)}</td>
     <td style="padding:14px 16px;">${categoryBadge(issue.category)}</td>
     <td style="padding:14px 16px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${issue.title || issue.description || '—'}</td>
     <td style="padding:14px 12px;">${locationCell(issue)}</td>
     <td style="padding:14px 12px;">${priorityBadge(issue.priority)}</td>
-    <td style="padding:14px 12px;">${statusBadge(issue.status)}</td>
-    <td style="padding:14px 12px;">${assignedBadge(issue.assignedTo)}</td>
+    <td style="padding:14px 12px;">${statusBadge(issue.status)}${contractorStatus !== 'none' ? `<br><span style="font-size:10px;color:#8b5cf6;">🏗️ ${contractorStatus.replace(/_/g, ' ')}</span>` : ''}</td>
+    <td style="padding:14px 12px;">${assignedBadge(issue.assignedTo, issue._id)}</td>
     <td style="padding:14px 12px;">
       <div style="display:flex;gap:5px;flex-wrap:wrap;">
         <button data-id="${issue._id}" data-status="approved" class="btn btn-success btn-sm" style="padding:4px 10px;font-size:11px;">Approve</button>
         <button data-id="${issue._id}" data-status="rejected" class="btn btn-danger btn-sm" style="padding:4px 10px;font-size:11px;">Reject</button>
         <button data-id="${issue._id}" data-status="hold" class="btn btn-warning btn-sm" style="padding:4px 10px;font-size:11px;">Hold</button>
-        <button onclick="openCommunicationModal('${issue._id}')" class="btn btn-primary btn-sm" style="padding:4px 10px;font-size:11px;background:#8B5CF6;border-color:#8B5CF6;">🤖 Draft PR</button>
+        ${showAssignBtn ? `<button onclick="triggerAiRecommend('${issue._id}')" class="btn btn-sm" style="padding:4px 10px;font-size:11px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;border:none;">🤖 Assign</button>` : ''}
+        ${showBidsBtn ? `<button onclick="openBidsModal('${issue._id}')" class="btn btn-sm" style="padding:4px 10px;font-size:11px;background:#6366f1;color:white;border:none;">📋 Bids</button>` : ''}
       </div>
     </td>
   </tr>`;
 }
 
 function buildIssueRowFull(issue) {
-  return `<tr>
+  const contractorStatus = issue.contractorAssignment?.status || 'none';
+  const showAssignBtn = issue.status === 'approved' && contractorStatus === 'none';
+  const showBidsBtn = ['sent_to_contractors', 'bidding_open', 'bid_accepted'].includes(contractorStatus);
+  const showCompletionBtn = ['completed', 'payment_pending', 'paid'].includes(contractorStatus);
+
+  return `<tr class="issue-row-clickable" onclick="handleRowClick(event, '${issue._id}')" tabindex="0" role="button" aria-label="View issue details">
     <td style="padding:14px 10px 14px 16px;"><input type="checkbox" data-id="${issue._id}"></td>
     <td class="cell-id" style="padding:14px 10px;">${issue._id.slice(-8)}</td>
     <td style="padding:14px 10px;">${categoryBadge(issue.category)}</td>
     <td style="padding:14px 10px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${issue.title || issue.description || '—'}</td>
     <td style="padding:14px 10px;">${locationCell(issue)}</td>
     <td style="padding:14px 10px;">${priorityBadge(issue.priority)}</td>
-    <td style="padding:14px 10px;">${statusBadge(issue.status)}</td>
-    <td style="padding:14px 10px;">${assignedBadge(issue.assignedTo)}</td>
+    <td style="padding:14px 10px;">${statusBadge(issue.status)}${contractorStatus !== 'none' ? `<br><span style="font-size:10px;color:#8b5cf6;">🏗️ ${contractorStatus.replace(/_/g, ' ')}</span>` : ''}</td>
+    <td style="padding:14px 10px;">${assignedBadge(issue.assignedTo, issue._id)}</td>
     <td style="padding:14px 10px;">
       <div style="display:flex;gap:5px;flex-wrap:wrap;">
-        <button onclick="openIssueResolver('${issue._id}')" class="btn btn-success btn-sm" style="padding:4px 10px;font-size:11px;">🔍 View / Resolve</button>
+        <button onclick="openReportDetail('${issue._id}')" class="btn btn-success btn-sm" style="padding:4px 10px;font-size:11px;">🔍 View</button>
+        ${showAssignBtn ? `<button onclick="triggerAiRecommend('${issue._id}')" class="btn btn-sm" style="padding:4px 10px;font-size:11px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;border:none;">🤖 Assign Contractor</button>` : ''}
+        ${showBidsBtn ? `<button onclick="openBidsModal('${issue._id}')" class="btn btn-sm" style="padding:4px 10px;font-size:11px;background:#6366f1;color:white;border:none;">📋 Bids</button>` : ''}
+        ${showCompletionBtn ? `<button onclick="openCompletionView('${issue._id}')" class="btn btn-sm" style="padding:4px 10px;font-size:11px;background:#10b981;color:white;border:none;">✅ Completion</button>` : ''}
         <button data-id="${issue._id}" data-status="rejected" class="btn btn-danger btn-sm" style="padding:4px 10px;font-size:11px;">Reject</button>
         <button data-id="${issue._id}" data-status="hold" class="btn btn-warning btn-sm" style="padding:4px 10px;font-size:11px;">Hold</button>
-        <button onclick="openCommunicationModal('${issue._id}')" class="btn btn-primary btn-sm" style="padding:4px 10px;font-size:11px;background:#8B5CF6;border-color:#8B5CF6;">🤖 Draft PR</button>
       </div>
     </td>
   </tr>`;
@@ -438,76 +651,6 @@ function buildIssueRowFull(issue) {
 // ── Charts ──
 let trendChartInst = null;
 let catChartInst = null;
-
-// ── Feature 5: AI Communications ──
-window.openCommunicationModal = function (issueId) {
-  // Use a simple prompt/alert setup for this demo, or inject a modal if preferred.
-  // To keep it clean, we'll construct a quick modal on the fly.
-  const existing = document.getElementById('aiCommModal');
-  if (existing) existing.remove();
-
-  const modalHtml = `
-    <div id="aiCommModal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; display:flex; align-items:center; justify-content:center;">
-      <div style="background:white; width:90%; max-width:500px; border-radius:12px; padding:24px; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
-        <h3 style="margin-top:0; font-size:1.25rem; display:flex; align-items:center; gap:8px;">🤖 Draft AI Response</h3>
-        <p style="color:#64748B; font-size:0.9rem; margin-bottom:16px;">Generate an official public relations statement or citizen update for this issue.</p>
-        
-        <label style="display:block; font-size:0.85rem; font-weight:600; margin-bottom:4px;">Tone</label>
-        <select id="aiCommTone" style="width:100%; padding:10px; border:1px solid #E2E8F0; border-radius:8px; margin-bottom:16px;">
-          <option value="professional">Professional & Official</option>
-          <option value="empathetic">Empathetic & Reassuring</option>
-          <option value="urgent">Urgent & Action-Oriented</option>
-        </select>
-
-        <label style="display:block; font-size:0.85rem; font-weight:600; margin-bottom:4px;">Additional Context (Optional)</label>
-        <input type="text" id="aiCommContext" placeholder="e.g. Teams dispatched, expected fix in 2 hours" style="width:100%; padding:10px; border:1px solid #E2E8F0; border-radius:8px; margin-bottom:16px;">
-
-        <div id="aiCommResult" style="display:none; background:#F8FAFC; padding:12px; border-radius:8px; border:1px solid #E2E8F0; font-size:0.9rem; color:#334155; margin-bottom:16px; white-space:pre-wrap; max-height:200px; overflow-y:auto;"></div>
-
-        <div style="display:flex; justify-content:flex-end; gap:12px;">
-          <button onclick="document.getElementById('aiCommModal').remove()" style="padding:10px 16px; border:none; background:none; cursor:pointer; color:#64748B; font-weight:600;">Close</button>
-          <button id="aiCommGenerateBtn" style="padding:10px 16px; border:none; background:#8B5CF6; color:white; border-radius:8px; cursor:pointer; font-weight:600;">Generate Draft</button>
-        </div>
-      </div>
-    </div>
-  `;
-
-  document.body.insertAdjacentHTML('beforeend', modalHtml);
-
-  document.getElementById('aiCommGenerateBtn').addEventListener('click', async () => {
-    const btn = document.getElementById('aiCommGenerateBtn');
-    const resBox = document.getElementById('aiCommResult');
-    const tone = document.getElementById('aiCommTone').value;
-    const context = document.getElementById('aiCommContext').value;
-
-    btn.disabled = true;
-    btn.textContent = 'Generating...';
-    resBox.style.display = 'block';
-    resBox.textContent = 'Consulting AI...';
-
-    try {
-      const resp = await fetch('/api/communications/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...adminAuthHeader()
-        },
-        body: JSON.stringify({ issueId, tone, context })
-      });
-
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.message || 'Error generating');
-
-      resBox.textContent = data.draft;
-      btn.textContent = 'Regenerate';
-      btn.disabled = false;
-    } catch (e) {
-      resBox.textContent = 'Failed to generate: ' + e.message;
-      btn.textContent = 'Try Again';
-      btn.disabled = false;
-    }
-  });
-}
 
 window.openIssueResolver = async function (issueId) {
   const existing = document.getElementById('aiResolverModal');
@@ -923,6 +1066,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const start = (currentPage - 1) * pageSize;
     const paginated = pending.slice(start, start + pageSize);
 
+    cleanupAssignPortals();
     tableBody.innerHTML = '';
     if (pending.length === 0) {
       tableBody.innerHTML = '<tr><td colspan="8" class="empty-state" style="padding:32px;">No pending issues</td></tr>';
@@ -948,7 +1092,7 @@ document.addEventListener('DOMContentLoaded', () => {
     savedEmpty?.classList.add('hidden');
 
     saved.forEach(issue => {
-      savedTableBody.innerHTML += `<tr>
+      savedTableBody.innerHTML += `<tr class="issue-row-clickable" onclick="handleRowClick(event, '${issue._id}')" tabindex="0" role="button" aria-label="View issue details">
         <td class="cell-id" style="padding:14px 20px;">${issue._id.slice(-8)}</td>
         <td style="padding:14px 20px;">${categoryBadge(issue.category)}</td>
         <td style="padding:14px 20px;">${issue.title || '—'}</td>
@@ -992,6 +1136,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const start = (issuesCurrentPage - 1) * pageSize;
     const paginated = filtered.slice(start, start + pageSize);
 
+    cleanupAssignPortals();
     tbody.innerHTML = '';
     if (filtered.length === 0) {
       tbody.innerHTML = '<tr><td colspan="9" class="empty-state" style="padding:32px;">No issues found</td></tr>';
@@ -1115,3 +1260,516 @@ document.addEventListener('DOMContentLoaded', () => {
   initAdminSocket();
   loadAll();
 });
+
+// ══════════════════════════════════════════════════════════════════
+// CONTRACTOR MANAGEMENT FUNCTIONS
+// ══════════════════════════════════════════════════════════════════
+
+// Fix Modal Functions
+window.openFixModal = function () {
+  const modal = document.getElementById('fixIssueModal');
+  const loading = document.getElementById('fixModalLoading');
+  const success = document.getElementById('fixModalSuccess');
+  const error = document.getElementById('fixModalError');
+
+  // Reset to loading state
+  loading.style.display = 'block';
+  success.style.display = 'none';
+  error.style.display = 'none';
+
+  modal.classList.add('show');
+};
+
+window.closeFixModal = function () {
+  document.getElementById('fixIssueModal').classList.remove('show');
+};
+
+window.updateFixModalSuccess = function () {
+  document.getElementById('fixModalLoading').style.display = 'none';
+  document.getElementById('fixModalSuccess').style.display = 'block';
+  document.getElementById('fixModalError').style.display = 'none';
+};
+
+window.updateFixModalError = function (message) {
+  document.getElementById('fixModalLoading').style.display = 'none';
+  document.getElementById('fixModalSuccess').style.display = 'none';
+  document.getElementById('fixModalError').style.display = 'block';
+  document.getElementById('fixModalErrorMsg').textContent = message || 'An error occurred.';
+};
+
+// Send issue to contractors (Fix button)
+window.sendToContractors = async function (issueId) {
+  // Show loading modal
+  openFixModal();
+
+  try {
+    const res = await fetch(`/api/admin/issue/${issueId}/send-to-contractors`, {
+      method: 'POST',
+      headers: adminAuthHeader()
+    });
+
+    const data = await res.json();
+
+    if (res.ok && data.success) {
+      updateFixModalSuccess();
+      loadAll();
+    } else {
+      throw new Error(data.message || 'Failed to send to contractors');
+    }
+  } catch (e) {
+    updateFixModalError(e.message);
+  }
+};
+
+// Open bids modal for an issue
+window.openBidsModal = async function (issueId) {
+  const modal = document.getElementById('bidsModal');
+  const issueInfo = document.getElementById('bidsModalIssueInfo');
+  const content = document.getElementById('bidsModalContent');
+
+  modal.classList.add('show');
+  content.innerHTML = '<div style="text-align:center;padding:40px;color:#64748b;">Loading bids...</div>';
+
+  try {
+    // Get issue details
+    const issue = allIssues.find(i => i._id === issueId);
+    if (issue) {
+      issueInfo.innerHTML = `
+        <h4 style="margin:0 0 4px 0;">${issue.title || 'Untitled Issue'}</h4>
+        <p style="margin:0;font-size:13px;color:#64748b;">📍 ${issue.location?.address || 'N/A'}</p>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          ${categoryBadge(issue.category)}
+          ${priorityBadge(issue.priority)}
+        </div>
+      `;
+    }
+
+    // Fetch bids
+    const res = await fetch(`/api/admin/issue/${issueId}/bids`, {
+      headers: adminAuthHeader()
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.message);
+
+    if (data.bids.length === 0) {
+      content.innerHTML = `
+        <div style="text-align:center;padding:40px;">
+          <div style="font-size:48px;margin-bottom:12px;">📋</div>
+          <p style="color:#64748b;">No bids received yet</p>
+        </div>
+      `;
+      return;
+    }
+
+    // Render bids
+    content.innerHTML = `
+      ${data.recommendation ? `
+        <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;padding:16px;border-radius:12px;margin-bottom:16px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <span style="font-size:20px;">🤖</span>
+            <strong>AI Recommendation</strong>
+          </div>
+          <p style="margin:0;font-size:14px;opacity:0.95;">${data.recommendation.reason}</p>
+        </div>
+      ` : ''}
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        ${data.bids.map(bid => `
+          <div style="border:${bid.isAIRecommended ? '2px solid #6366f1' : '1px solid #e2e8f0'};border-radius:12px;padding:16px;${bid.isAIRecommended ? 'background:#f5f3ff;' : ''}">
+            ${bid.isAIRecommended ? '<div style="display:inline-block;background:#6366f1;color:white;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;margin-bottom:12px;">🤖 RECOMMENDED</div>' : ''}
+            <div style="display:flex;justify-content:space-between;align-items:start;">
+              <div>
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                  <div style="width:40px;height:40px;border-radius:10px;background:#6366f1;color:white;display:flex;align-items:center;justify-content:center;font-weight:600;">
+                    ${(bid.contractor.name || 'C').charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <h4 style="margin:0;font-size:15px;">${bid.contractor.name}</h4>
+                    <p style="margin:0;font-size:12px;color:#64748b;">${bid.contractor.isVerified ? '✓ Verified' : ''} GST: ${bid.contractor.gstNumber}</p>
+                  </div>
+                </div>
+                <div style="display:flex;gap:16px;font-size:13px;color:#64748b;margin-top:8px;">
+                  <span>📍 ${bid.contractor.location?.address || 'N/A'}</span>
+                  <span>⭐ ${bid.contractor.statistics?.averageRating?.toFixed(1) || '0.0'}/5</span>
+                  <span>🏆 ${bid.contractor.statistics?.completedProjects || 0} projects</span>
+                </div>
+                <div style="margin-top:8px;font-size:12px;color:#94a3b8;">
+                  Aadhaar: ${bid.contractor.aadhaarNumber}
+                </div>
+              </div>
+              <div style="text-align:right;">
+                <div style="font-size:24px;font-weight:800;color:#1e293b;">₹${bid.bidAmount?.toLocaleString()}</div>
+                <div style="font-size:13px;color:#64748b;">${bid.completionDays} days</div>
+                <div style="font-size:12px;color:#94a3b8;">Deadline: ${new Date(bid.completionDeadline).toLocaleDateString()}</div>
+              </div>
+            </div>
+            <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
+              <span class="badge ${bid.status === 'pending' ? 'badge-hold' : bid.status === 'accepted' ? 'badge-approved' : 'badge-rejected'}">
+                ${bid.status.toUpperCase()}
+              </span>
+              ${bid.status === 'pending' ? `
+                <button onclick="acceptBid('${bid.id}')" class="btn btn-success btn-sm">✓ Accept Bid</button>
+              ` : ''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } catch (e) {
+    content.innerHTML = `<div style="text-align:center;padding:40px;color:#ef4444;">Error: ${e.message}</div>`;
+  }
+};
+
+// Close bids modal
+window.closeBidsModal = function () {
+  document.getElementById('bidsModal').classList.remove('show');
+};
+
+// Accept a bid
+window.acceptBid = async function (bidId) {
+  if (!confirm('Accept this bid? This will reject all other bids for this issue.')) return;
+
+  try {
+    const res = await fetch(`/api/admin/bid/${bidId}/accept`, {
+      method: 'POST',
+      headers: adminAuthHeader()
+    });
+
+    const data = await res.json();
+
+    if (res.ok && data.success) {
+      showAdminToast('Bid accepted successfully!', 'success');
+      closeBidsModal();
+      loadAll();
+    } else {
+      throw new Error(data.message || 'Failed to accept bid');
+    }
+  } catch (e) {
+    showAdminToast(e.message, 'error');
+  }
+};
+
+// Toast notification
+function showAdminToast(message, type = 'info') {
+  const toast = document.createElement('div');
+  toast.style.cssText = `
+    position:fixed; bottom:24px; right:24px; background:white; padding:16px 20px;
+    border-radius:12px; box-shadow:0 10px 25px rgba(0,0,0,0.15);
+    border-left:4px solid ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#6366f1'};
+    z-index:99999; display:flex; align-items:center; gap:12px;
+    animation: slideIn 0.3s ease-out; max-width:400px;
+  `;
+  toast.innerHTML = `
+    <span style="font-size:20px;">${type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ️'}</span>
+    <span style="color:#1e293b;font-weight:500;">${message}</span>
+  `;
+  document.body.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.animation = 'fadeOut 0.3s ease-in forwards';
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// REPORT DETAIL & AI CONTRACTOR ASSIGNMENT FLOW
+// ══════════════════════════════════════════════════════════════════
+
+window.handleRowClick = function (e, issueId) {
+  // Ignore clicks on buttons, inputs, links, or custom assignment dropdowns
+  const ignored = ['BUTTON', 'INPUT', 'A', 'SELECT'];
+  if (ignored.includes(e.target.tagName)) return;
+  if (e.target.closest('button') || e.target.closest('input') || e.target.closest('a') || e.target.closest('.assigned-dropdown-wrap')) return;
+  openReportDetail(issueId);
+};
+
+// Open Report Detail Modal
+window.openReportDetail = async function (issueId) {
+  const modal = document.getElementById('reportDetailModal');
+  const body = document.getElementById('rdBody');
+  const title = document.getElementById('rdTitle');
+  modal.style.display = 'flex';
+  body.innerHTML = '<div style="text-align:center;padding:40px;color:#64748b;">Loading report...</div>';
+
+  try {
+    const res = await fetch(`/api/admin/issue/${issueId}/details`, { headers: adminAuthHeader() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message);
+
+    const issue = data.issue;
+    title.textContent = `Report: ${issue.title || 'Untitled'}`;
+
+    const coords = issue.location?.coordinates || [];
+    const lat = coords[1] || 'N/A';
+    const lng = coords[0] || 'N/A';
+    const statusMap = {
+      new: '🟡 New', approved: '🟢 Approved', rejected: '🔴 Rejected',
+      hold: '🟠 On Hold', in_progress: '🔵 In Progress', resolved: '✅ Resolved'
+    };
+
+    // Build images HTML
+    let imagesHTML = '<span style="color:#94a3b8;">No images</span>';
+    if (issue.images && issue.images.length > 0) {
+      imagesHTML = `<div class="rd-images">${issue.images.map(img =>
+        `<img src="${img.url}" alt="Report image" onerror="this.style.display='none'">`
+      ).join('')}</div>`;
+    }
+
+    // Build action buttons based on contractor assignment status
+    let actionHTML = '';
+    const caStatus = issue.contractorAssignment?.status || 'none';
+
+    if (issue.status === 'approved' && caStatus === 'none') {
+      actionHTML = `<button onclick="triggerAiRecommend('${issue._id}')" class="btn btn-primary" style="width:100%;margin-top:20px;padding:14px;font-size:15px;font-weight:700;">
+        🤖 Assign Contractor (AI Recommended)
+      </button>`;
+    } else if (['sent_to_contractors', 'bidding_open'].includes(caStatus)) {
+      actionHTML = `<div style="display:flex;gap:12px;margin-top:20px;">
+        <button onclick="closeReportDetail(); openBidsModal('${issue._id}')" class="btn btn-primary" style="flex:1;padding:14px;">📋 View Bids (${data.bidCount})</button>
+        <span style="display:flex;align-items:center;color:#64748b;font-size:13px;">⏳ Awaiting bids...</span>
+      </div>`;
+    } else if (['bid_accepted', 'work_in_progress'].includes(caStatus)) {
+      const cName = issue.contractorAssignment?.acceptedContractor?.name || 'Contractor';
+      actionHTML = `<div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;padding:16px;border-radius:12px;margin-top:20px;text-align:center;">
+        <div style="font-size:13px;opacity:0.9;">🤖 BEST CONTRACTOR FOR THIS PROJECT</div>
+        <div style="font-size:20px;font-weight:800;margin:4px 0;">${cName}</div>
+        <div style="font-size:13px;opacity:0.8;">Status: ${caStatus.replace(/_/g, ' ').toUpperCase()}</div>
+      </div>`;
+    } else if (['completed', 'payment_pending', 'paid'].includes(caStatus)) {
+      actionHTML = `<button onclick="closeReportDetail(); openCompletionView('${issue._id}')" class="btn btn-success" style="width:100%;margin-top:20px;padding:14px;">
+        ✅ View Completion Report
+      </button>`;
+    }
+
+    body.innerHTML = `
+      <div class="rd-field"><div class="rd-label">Title</div><div class="rd-value" style="font-size:16px;font-weight:600;">${issue.title}</div></div>
+      <div class="rd-field"><div class="rd-label">Description</div><div class="rd-value">${issue.description || '—'}</div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="rd-field"><div class="rd-label">Issue ID</div><div class="rd-value" style="font-family:monospace;">${issue._id}</div></div>
+        <div class="rd-field"><div class="rd-label">Reported By</div><div class="rd-value">${issue.reportedBy?.name || 'Anonymous User'}</div></div>
+        <div class="rd-field"><div class="rd-label">Category</div><div class="rd-value">${categoryBadge(issue.category)}</div></div>
+        <div class="rd-field"><div class="rd-label">Priority</div><div class="rd-value">${priorityBadge(issue.priority)}</div></div>
+        <div class="rd-field"><div class="rd-label">Status</div><div class="rd-value">${statusMap[issue.status] || issue.status}</div></div>
+        <div class="rd-field"><div class="rd-label">Report Date</div><div class="rd-value">${new Date(issue.createdAt).toLocaleDateString()}</div></div>
+      </div>
+      <div class="rd-field"><div class="rd-label">Location</div><div class="rd-value">📍 ${issue.location?.address || `Lat: ${lat}, Lng: ${lng}`}</div></div>
+      <div class="rd-field"><div class="rd-label">Images</div>${imagesHTML}</div>
+      ${actionHTML}
+    `;
+  } catch (err) {
+    body.innerHTML = `<div style="text-align:center;padding:40px;color:#ef4444;">Error: ${err.message}</div>`;
+  }
+};
+
+window.closeReportDetail = function () {
+  document.getElementById('reportDetailModal').style.display = 'none';
+};
+
+// ── AI Contractor Recommendation Flow ──
+window.triggerAiRecommend = async function (issueId) {
+  // Close report detail, open AI modal
+  closeReportDetail();
+  const modal = document.getElementById('aiRecommendModal');
+  const loading = document.getElementById('aiLoadingState');
+  const results = document.getElementById('aiResultsState');
+  const error = document.getElementById('aiErrorState');
+
+  modal.style.display = 'flex';
+  loading.style.display = 'block';
+  results.style.display = 'none';
+  error.style.display = 'none';
+
+  try {
+    const res = await fetch(`/api/admin/issue/${issueId}/ai-recommend-contractors`, {
+      method: 'POST',
+      headers: adminAuthHeader()
+    });
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.message);
+
+    loading.style.display = 'none';
+    results.style.display = 'block';
+
+    const rec = data.recommendation;
+    const contractors = rec?.contractors || [];
+
+    results.innerHTML = `
+      <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;padding:16px;border-radius:12px;margin-bottom:16px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span style="font-size:20px;">🤖</span>
+          <strong>AI Analysis Complete</strong>
+        </div>
+        <p style="margin:0;font-size:14px;opacity:0.95;">${rec?.overallAnalysis || 'Analysis completed.'}</p>
+        <p style="margin:4px 0 0;font-size:12px;opacity:0.7;">${rec?.totalAnalyzed || 0} contractors analyzed • Method: ${rec?.method || 'AI'}</p>
+      </div>
+      <h4 style="margin-bottom:12px;font-size:15px;">Top Recommended Contractors</h4>
+      ${contractors.length === 0 ? '<p style="color:#94a3b8;">No contractors available.</p>' :
+        contractors.map((c, i) => `
+          <div class="ai-contractor-card ${i === 0 ? 'recommended' : ''}">
+            ${i === 0 ? '<div style="display:inline-block;background:#6366f1;color:white;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;margin-bottom:10px;">🏆 TOP PICK</div>' : ''}
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <div>
+                <div style="font-weight:700;font-size:15px;color:#1e293b;">${c.name}</div>
+                <div style="font-size:13px;color:#64748b;margin-top:2px;">
+                  ⭐ ${c.stats?.averageRating?.toFixed(1) || '0.0'} • 🏆 ${c.stats?.completedProjects || 0} projects
+                  ${c.distanceKm !== null ? ` • 📍 ${c.distanceKm}km` : ''}
+                  ${c.isVerified ? ' • ✓ Verified' : ''}
+                </div>
+              </div>
+              <div style="background:#f0fdf4;color:#16a34a;padding:6px 12px;border-radius:8px;font-weight:700;font-size:14px;">
+                ${c.score}/100
+              </div>
+            </div>
+            <p style="margin:8px 0 0;font-size:13px;color:#64748b;">${c.reason}</p>
+          </div>
+        `).join('')
+      }
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;padding:14px;border-radius:10px;margin-top:16px;">
+        <p style="margin:0;color:#16a34a;font-weight:600;font-size:14px;">✅ Issue has been sent to all contractors for bidding!</p>
+        <p style="margin:4px 0 0;color:#64748b;font-size:13px;">Contractors will receive a live notification. Bids will appear in real-time.</p>
+      </div>
+      <button onclick="closeAiRecommend(); if(typeof loadAll==='function') loadAll();" class="btn btn-primary" style="width:100%;margin-top:16px;padding:12px;">Done</button>
+    `;
+  } catch (err) {
+    loading.style.display = 'none';
+    error.style.display = 'block';
+    document.getElementById('aiErrorMsg').textContent = err.message;
+  }
+};
+
+window.closeAiRecommend = function () {
+  document.getElementById('aiRecommendModal').style.display = 'none';
+};
+
+// ── Completion View ──
+window.openCompletionView = async function (issueId) {
+  const modal = document.getElementById('completionViewModal');
+  const body = document.getElementById('completionViewBody');
+  modal.style.display = 'flex';
+  body.innerHTML = '<div style="text-align:center;padding:40px;color:#64748b;">Loading...</div>';
+
+  try {
+    const res = await fetch(`/api/admin/issue/${issueId}/details`, { headers: adminAuthHeader() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message);
+
+    const issue = data.issue;
+    const bid = data.acceptedBidDetails;
+
+    if (!bid || !bid.workProof) {
+      body.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">No completion data available yet.</div>';
+      return;
+    }
+
+    const contractor = bid.contractor || {};
+    const proof = bid.workProof;
+
+    body.innerHTML = `
+      <div style="background:#f8fafc;padding:16px;border-radius:12px;margin-bottom:20px;">
+        <h4 style="margin:0 0 8px;font-size:15px;">${issue.title}</h4>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:#64748b;">
+          <span>${categoryBadge(issue.category)}</span>
+          <span>${priorityBadge(issue.priority)}</span>
+          <span>📍 ${issue.location?.address || 'N/A'}</span>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:12px;padding:14px;background:#f0f9ff;border-radius:10px;margin-bottom:20px;">
+        <div style="width:44px;height:44px;border-radius:10px;background:#6366f1;color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;">
+          ${(contractor.name || 'C').charAt(0).toUpperCase()}
+        </div>
+        <div>
+          <div style="font-weight:700;color:#1e293b;">${contractor.name || 'Contractor'}</div>
+          <div style="font-size:13px;color:#64748b;">⭐ ${contractor.statistics?.averageRating?.toFixed(1) || '0.0'} • 🏆 ${contractor.statistics?.completedProjects || 0} projects</div>
+        </div>
+      </div>
+
+      <h4 style="margin-bottom:12px;">Before & After Comparison</h4>
+      <div class="completion-compare">
+        <div class="compare-col">
+          <h4 style="color:#ef4444;">📷 Before</h4>
+          ${proof.beforeImages && proof.beforeImages.length > 0
+        ? proof.beforeImages.map(img => `<img src="${img.url}" alt="Before" style="margin-bottom:8px;" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22150%22><rect fill=%22%23f1f5f9%22 width=%22200%22 height=%22150%22/><text fill=%22%2394a3b8%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22>No Image</text></svg>'">`).join('')
+        : '<div style="padding:40px;background:#f8fafc;border-radius:10px;color:#94a3b8;">No before image</div>'
+      }
+        </div>
+        <div class="compare-col">
+          <h4 style="color:#10b981;">📷 After</h4>
+          ${proof.afterImages && proof.afterImages.length > 0
+        ? proof.afterImages.map(img => `<img src="${img.url}" alt="After" style="margin-bottom:8px;" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22150%22><rect fill=%22%23f0fdf4%22 width=%22200%22 height=%22150%22/><text fill=%22%2394a3b8%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22>No Image</text></svg>'">`).join('')
+        : '<div style="padding:40px;background:#f0fdf4;border-radius:10px;color:#94a3b8;">No after image</div>'
+      }
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;">
+        <div style="background:#f8fafc;padding:12px;border-radius:8px;">
+          <div style="font-size:12px;color:#64748b;font-weight:600;">COMPLETED AT</div>
+          <div style="font-size:14px;color:#1e293b;margin-top:2px;">${proof.submittedAt ? new Date(proof.submittedAt).toLocaleString() : 'N/A'}</div>
+        </div>
+        <div style="background:#f8fafc;padding:12px;border-radius:8px;">
+          <div style="font-size:12px;color:#64748b;font-weight:600;">BID AMOUNT</div>
+          <div style="font-size:14px;color:#1e293b;margin-top:2px;">₹${bid.bidAmount?.toLocaleString() || 'N/A'}</div>
+        </div>
+      </div>
+
+      ${proof.notes ? `<div style="margin-top:16px;padding:12px;background:#fffbeb;border-radius:8px;border:1px solid #fde68a;"><div style="font-size:12px;color:#92400e;font-weight:600;">CONTRACTOR NOTES</div><div style="font-size:14px;color:#78350f;margin-top:4px;">${proof.notes}</div></div>` : ''}
+
+      ${bid.status === 'completed' ? `<button onclick="approvePaymentFromView('${bid._id}')" class="btn btn-success" style="width:100%;margin-top:20px;padding:14px;">💰 Approve Payment</button>` : ''}
+    `;
+  } catch (err) {
+    body.innerHTML = `<div style="text-align:center;padding:40px;color:#ef4444;">Error: ${err.message}</div>`;
+  }
+};
+
+window.closeCompletionView = function () {
+  document.getElementById('completionViewModal').style.display = 'none';
+};
+
+window.approvePaymentFromView = async function (bidId) {
+  if (!confirm('Approve payment for this completed work?')) return;
+  try {
+    const res = await fetch(`/api/admin/bid/${bidId}/approve-payment`, {
+      method: 'POST',
+      headers: adminAuthHeader()
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showAdminToast('Payment approved!', 'success');
+      closeCompletionView();
+      if (typeof loadAll === 'function') loadAll();
+    } else {
+      showAdminToast(data.message || 'Error', 'error');
+    }
+  } catch (e) {
+    showAdminToast(e.message, 'error');
+  }
+};
+
+// ══════════════════════════════════════════════════════════════════
+// SOCKET.IO REAL-TIME LISTENERS
+// ══════════════════════════════════════════════════════════════════
+
+(function initAdminSocketListeners() {
+  if (typeof io === 'undefined') return;
+  const socket = io();
+  socket.emit('join-admin-room');
+
+  socket.on('new_bid_submitted', (data) => {
+    showAdminToast(`New bid from ${data.contractorName}: ₹${data.bidAmount?.toLocaleString()}`, 'info');
+    if (typeof loadAll === 'function') loadAll();
+  });
+
+  socket.on('bid:accepted', (data) => {
+    showAdminToast(`Bid accepted for ${data.contractorName}`, 'success');
+    if (typeof loadAll === 'function') loadAll();
+  });
+
+  socket.on('work:completed', (data) => {
+    showAdminToast(`Work completed by ${data.contractorName}! Location verified: ${data.distance}m`, 'success');
+    if (typeof loadAll === 'function') loadAll();
+  });
+})();
+

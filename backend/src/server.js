@@ -20,6 +20,8 @@ const notificationRoutes = require('./routes/notification.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
 const sentimentRoutes = require('./routes/sentiment.routes');
 const communicationRoutes = require('./routes/communication.routes');
+const contractorAuthRoutes = require('./routes/contractor.auth.routes');
+const contractorRoutes = require('./routes/contractor.routes');
 
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
@@ -48,8 +50,8 @@ classifier.initialize();
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
+  max: 1000, // limit each IP to 1000 requests per windowMs
+  message: { error: 'Too many requests from this IP, please try again later.' }
 });
 
 // Middleware
@@ -69,6 +71,7 @@ app.use(helmet({
         "https://cdn.jsdelivr.net",
         "https://unpkg.com"
       ],
+      scriptSrcAttr: ["'unsafe-inline'"],
       styleSrc: [
         "'self'",
         "'unsafe-inline'",
@@ -110,24 +113,27 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(morgan('combined', { stream: { write: message => logger.info(message.trim()) } }));
 app.use('/api/', limiter);
 
-// Socket.io middleware
-io.use((socket, next) => {
-  // Add authentication for socket connections
-  const token = socket.handshake.auth.token;
-  if (token) {
-    // Verify token here
-    next();
-  } else {
-    next(new Error('Authentication error'));
-  }
-});
-
-// Socket.io connection handling
+// Socket.io connection handling (no auth required for basic connection)
 io.on('connection', (socket) => {
   logger.info('New client connected:', socket.id);
 
+  // Join user-specific room (for citizens)
   socket.on('join-room', (userId) => {
     socket.join(`user-${userId}`);
+    logger.info(`User ${userId} joined room`);
+  });
+
+  // Join contractor room
+  socket.on('join-contractor-room', (contractorId) => {
+    socket.join(`contractor-${contractorId}`);
+    socket.join('contractors'); // General contractors room
+    logger.info(`Contractor ${contractorId} joined room`);
+  });
+
+  // Join admin room
+  socket.on('join-admin-room', () => {
+    socket.join('admins');
+    logger.info('Admin joined admin room');
   });
 
   socket.on('disconnect', () => {
@@ -138,12 +144,14 @@ io.on('connection', (socket) => {
 // Make io accessible to routes
 app.set('io', io);
 
-// Static Frontend (Citizen Panel at /, Admin Panel at /admin)
+// Static Frontend (Citizen Panel at /, Admin Panel at /admin, Contractor Panel at /contractor)
 const citizenPanelDir = path.join(__dirname, '..', '..', 'frontend', 'citizen-panel');
 const adminPanelDir = path.join(__dirname, '..', '..', 'frontend', 'admin-panel');
+const contractorPanelDir = path.join(__dirname, '..', '..', 'frontend', 'contractor-panel');
 
 // Serve static BEFORE API routes to ensure HTML takes precedence
 app.use('/admin', express.static(adminPanelDir));
+app.use('/contractor', express.static(contractorPanelDir));
 app.use(express.static(citizenPanelDir));
 
 // Proxy Tailwind CDN locally to avoid third-party blocking
@@ -171,6 +179,8 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/sentiment', sentimentRoutes);
 app.use('/api/communications', communicationRoutes);
+app.use('/api/contractor/auth', contractorAuthRoutes);
+app.use('/api/contractor', contractorRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -189,6 +199,10 @@ app.get('/', (req, res) => {
 
 app.get('/admin', (req, res) => {
   res.sendFile(path.join(adminPanelDir, 'index.html'));
+});
+
+app.get('/contractor', (req, res) => {
+  res.sendFile(path.join(contractorPanelDir, 'index.html'));
 });
 
 // Error handling middleware

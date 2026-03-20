@@ -62,10 +62,8 @@ const issueSchema = new mongoose.Schema({
     required: false
   },
   assignedTo: {
-    department: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Department'
-    },
+    department: String,
+    name: String,
     staff: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
@@ -149,6 +147,25 @@ const issueSchema = new mongoose.Schema({
     device: String,
     ipAddress: String,
     userAgent: String
+  },
+  contractorAssignment: {
+    status: {
+      type: String,
+      enum: ['none', 'sent_to_contractors', 'bidding_open', 'bid_accepted', 'work_in_progress', 'completed', 'payment_pending', 'paid'],
+      default: 'none'
+    },
+    sentAt: Date,
+    acceptedBid: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Bid'
+    },
+    acceptedContractor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Contractor'
+    },
+    acceptedAt: Date,
+    completedAt: Date,
+    paidAt: Date
   }
 }, {
   timestamps: true,
@@ -163,6 +180,7 @@ issueSchema.index({ category: 1 });
 issueSchema.index({ reportedBy: 1 });
 issueSchema.index({ 'assignedTo.department': 1 });
 issueSchema.index({ createdAt: -1 });
+issueSchema.index({ 'contractorAssignment.status': 1 });
 
 // Virtual for resolution time
 issueSchema.virtual('resolutionTime').get(function() {

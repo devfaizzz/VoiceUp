@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contractor Registration - VoiceUp</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #6366f1;
+            --primary-light: #818cf8;
+            --primary-dark: #4f46e5;
+            --success: #10b981;
+            --success-dark: #059669;
+            --text-primary: #1e1b4b;
+            --text-secondary: #4b5563;
+            --text-muted: #9ca3af;
+            --radius: 16px;
+            --radius-sm: 10px;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0f1535 0%, #1a1f4e 40%, #2d1b69 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            width: 500px;
+            height: 500px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(99, 102, 241, 0.15), transparent 70%);
+            top: -100px;
+            right: -100px;
+            animation: floatBlob 8s ease-in-out infinite;
+        }
+
+        body::after {
+            content: '';
+            position: absolute;
+            width: 400px;
+            height: 400px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(168, 85, 247, 0.1), transparent 70%);
+            bottom: -80px;
+            left: -80px;
+            animation: floatBlob 10s ease-in-out infinite reverse;
+        }
+
+        @keyframes floatBlob {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            50% { transform: translate(30px, -30px) scale(1.05); }
+        }
+
+        .signup-card {
+            background: rgba(255, 255, 255, 0.95);
+            -webkit-backdrop-filter: blur(20px);
+            backdrop-filter: blur(20px);
+            border-radius: var(--radius);
+            padding: 48px 40px;
+            width: 100%;
+            max-width: 640px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            position: relative;
+            z-index: 1;
+            animation: slideUp 0.5s ease-out;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .signup-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .signup-icon {
+            width: 56px;
+            height: 56px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 16px;
+            font-size: 24px;
+        }
+
+        .signup-header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .signup-header p {
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+
+        @media (max-width: 640px) {
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+            .signup-card {
+                padding: 32px 24px;
+            }
+        }
+
+        .form-group {
+            margin-bottom: 0;
+        }
+
+        .form-group.full-width {
+            grid-column: 1 / -1;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e5e7eb;
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            font-family: inherit;
+            transition: all 0.2s ease;
+            background: #f9fafb;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+            background: #fff;
+            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+        }
+
+        .form-group input::placeholder,
+        .form-group textarea::placeholder {
+            color: var(--text-muted);
+        }
+
+        .form-hint {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .file-upload {
+            border: 2px dashed #d1d5db;
+            border-radius: var(--radius-sm);
+            padding: 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: #f9fafb;
+        }
+
+        .file-upload:hover {
+            border-color: var(--primary);
+            background: rgba(99, 102, 241, 0.05);
+        }
+
+        .file-upload-icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+
+        .file-upload-text {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .file-upload-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .preview-img {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 3px solid var(--primary);
+            margin: 0 auto 8px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .location-btn {
+            width: 100%;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, var(--success), var(--success-dark));
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .location-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(16, 185, 129, 0.35);
+        }
+
+        .location-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .location-display {
+            margin-top: 12px;
+            padding: 12px 16px;
+            background: #f0fdf4;
+            border-radius: var(--radius-sm);
+            border: 1px solid #bbf7d0;
+        }
+
+        .location-display .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #166534;
+        }
+
+        .location-display .coords {
+            font-size: 12px;
+            color: #4ade80;
+            margin-top: 4px;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 16px 24px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-size: 15px;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 24px;
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(99, 102, 241, 0.35);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .form-msg {
+            margin-top: 16px;
+            padding: 12px 16px;
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+        }
+
+        .form-msg.error {
+            background: rgba(239, 68, 68, 0.1);
+            color: #dc2626;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+
+        .form-msg.success {
+            background: rgba(16, 185, 129, 0.1);
+            color: #059669;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .signup-footer {
+            margin-top: 24px;
+            text-align: center;
+        }
+
+        .signup-footer p {
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        .signup-footer a {
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.2s ease;
+        }
+
+        .signup-footer a:hover {
+            color: var(--primary-dark);
+            text-decoration: underline;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .animate-pulse {
+            animation: pulse 1.5s infinite;
+        }
+    </style>
+</head>
+<body>
+
+<div class="signup-card">
+    <div class="signup-header">
+        <div class="signup-icon">🏗️</div>
+        <h1>Contractor Registration</h1>
+        <p>Join VoiceUp to bid on civic repair projects</p>
+    </div>
+
+    <form id="signupForm" enctype="multipart/form-data">
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="name">Full Name *</label>
+                <input type="text" id="name" placeholder="Enter your full name" required>
+            </div>
+            <div class="form-group">
+                <label for="email">Email Address *</label>
+                <input type="email" id="email" placeholder="contractor@example.com" required>
+            </div>
+            <div class="form-group">
+                <label for="phone">Phone Number *</label>
+                <input type="tel" id="phone" placeholder="+91 XXXXXXXXXX" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password *</label>
+                <input type="password" id="password" placeholder="Min. 6 characters" required minlength="6">
+            </div>
+            <div class="form-group">
+                <label for="aadhaarNumber">Aadhaar Number *</label>
+                <input type="text" id="aadhaarNumber" placeholder="12-digit Aadhaar number" required pattern="\d{12}" maxlength="12">
+                <div class="form-hint">Your Aadhaar is encrypted and secure</div>
+            </div>
+            <div class="form-group">
+                <label for="gstNumber">GST Number *</label>
+                <input type="text" id="gstNumber" placeholder="15-character GSTIN" required pattern="[0-9A-Z]{15}" maxlength="15" style="text-transform: uppercase;">
+                <div class="form-hint">Format: 22AAAAA0000A1Z5</div>
+            </div>
+            <div class="form-group full-width">
+                <label for="address">Full Address *</label>
+                <textarea id="address" rows="2" placeholder="Enter your complete business address" required></textarea>
+            </div>
+            <div class="form-group full-width">
+                <label for="profilePicture">Profile Picture</label>
+                <div class="file-upload" id="fileUploadArea">
+                    <input type="file" id="profilePicture" accept="image/*" class="hidden" aria-label="Upload profile picture" title="Upload profile picture">
+                    <div id="uploadPlaceholder">
+                        <div class="file-upload-icon">📷</div>
+                        <div class="file-upload-text">Click to upload profile picture</div>
+                        <div class="file-upload-hint">JPG, PNG up to 5MB</div>
+                    </div>
+                    <div id="previewContainer" class="hidden">
+                        <img id="imagePreview" class="preview-img" alt="Profile picture preview" title="Profile picture preview">
+                        <div id="fileName" class="file-upload-text"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="form-group full-width">
+                <label>Current Location *</label>
+                <button type="button" id="detectLocationBtn" class="location-btn">
+                    <span>📍</span> Detect My Location
+                </button>
+                <div id="locationDisplay" class="location-display hidden">
+                    <div class="status">
+                        <span>✓</span>
+                        <span id="locationText">Location captured successfully</span>
+                    </div>
+                    <div class="coords">
+                        Lat: <span id="latDisplay">-</span>, Lng: <span id="lngDisplay">-</span>
+                    </div>
+                </div>
+                <input type="hidden" id="latitude">
+                <input type="hidden" id="longitude">
+            </div>
+        </div>
+
+        <div id="errorMsg" class="form-msg error hidden"></div>
+        <div id="successMsg" class="form-msg success hidden"></div>
+
+        <button type="submit" id="submitBtn" class="submit-btn">
+            Create Contractor Account
+        </button>
+    </form>
+
+    <div class="signup-footer">
+        <p>Already have an account? <a href="/contractor/login.html">Login here</a></p>
+    </div>
+</div>
+
+<script>
+    // File upload handling
+    const fileUploadArea = document.getElementById('fileUploadArea');
+    const fileInput = document.getElementById('profilePicture');
+    const uploadPlaceholder = document.getElementById('uploadPlaceholder');
+    const previewContainer = document.getElementById('previewContainer');
+    const imagePreview = document.getElementById('imagePreview');
+    const fileName = document.getElementById('fileName');
+
+    fileUploadArea.addEventListener('click', () => fileInput.click());
+    
+    fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            if (file.size > 5 * 1024 * 1024) {
+                alert('File size must be less than 5MB');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                imagePreview.src = e.target.result;
+                fileName.textContent = file.name;
+                uploadPlaceholder.classList.add('hidden');
+                previewContainer.classList.remove('hidden');
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+
+    // Location detection
+    const detectLocationBtn = document.getElementById('detectLocationBtn');
+    const locationDisplay = document.getElementById('locationDisplay');
+    const latInput = document.getElementById('latitude');
+    const lngInput = document.getElementById('longitude');
+    const latDisplay = document.getElementById('latDisplay');
+    const lngDisplay = document.getElementById('lngDisplay');
+    const locationText = document.getElementById('locationText');
+
+    detectLocationBtn.addEventListener('click', () => {
+        if (!navigator.geolocation) {
+            alert('Geolocation is not supported by your browser');
+            return;
+        }
+
+        detectLocationBtn.disabled = true;
+        detectLocationBtn.innerHTML = '<span class="animate-pulse">📍</span> Detecting...';
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                
+                latInput.value = lat;
+                lngInput.value = lng;
+                latDisplay.textContent = lat.toFixed(6);
+                lngDisplay.textContent = lng.toFixed(6);
+                locationText.textContent = 'Location captured successfully';
+                locationDisplay.classList.remove('hidden');
+                
+                detectLocationBtn.disabled = false;
+                detectLocationBtn.innerHTML = '<span>✓</span> Location Captured';
+                detectLocationBtn.style.background = 'var(--success)';
+            },
+            (error) => {
+                alert('Unable to get location: ' + error.message);
+                detectLocationBtn.disabled = false;
+                detectLocationBtn.innerHTML = '<span>📍</span> Detect My Location';
+            },
+            { enableHighAccuracy: true, timeout: 10000 }
+        );
+    });
+
+    // Form submission
+    const signupForm = document.getElementById('signupForm');
+    const submitBtn = document.getElementById('submitBtn');
+    const errorMsg = document.getElementById('errorMsg');
+    const successMsg = document.getElementById('successMsg');
+
+    signupForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        errorMsg.classList.add('hidden');
+        successMsg.classList.add('hidden');
+
+        // Validate location
+        if (!latInput.value || !lngInput.value) {
+            errorMsg.textContent = 'Please detect your location before submitting';
+            errorMsg.classList.remove('hidden');
+            return;
+        }
+
+        // Validate Aadhaar
+        const aadhaar = document.getElementById('aadhaarNumber').value;
+        if (!/^\d{12}$/.test(aadhaar)) {
+            errorMsg.textContent = 'Aadhaar number must be exactly 12 digits';
+            errorMsg.classList.remove('hidden');
+            return;
+        }
+
+        // Validate GST
+        const gst = document.getElementById('gstNumber').value.toUpperCase();
+        if (!/^[0-9A-Z]{15}$/.test(gst)) {
+            errorMsg.textContent = 'GST number must be exactly 15 alphanumeric characters';
+            errorMsg.classList.remove('hidden');
+            return;
+        }
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Creating Account...';
+
+        try {
+            const formData = new FormData();
+            formData.append('name', document.getElementById('name').value);
+            formData.append('email', document.getElementById('email').value);
+            formData.append('phone', document.getElementById('phone').value);
+            formData.append('password', document.getElementById('password').value);
+            formData.append('aadhaarNumber', aadhaar);
+            formData.append('gstNumber', gst);
+            formData.append('address', document.getElementById('address').value);
+            formData.append('latitude', latInput.value);
+            formData.append('longitude', lngInput.value);
+            
+            if (fileInput.files[0]) {
+                formData.append('profilePicture', fileInput.files[0]);
+            }
+
+            const response = await fetch('/api/contractor/auth/signup', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                // Save auth data
+                localStorage.setItem('contractor_token', data.token);
+                localStorage.setItem('contractor_user', JSON.stringify(data.contractor));
+                if (data.refreshToken) {
+                    localStorage.setItem('contractor_refresh', data.refreshToken);
+                }
+
+                successMsg.textContent = 'Account created successfully! Redirecting...';
+                successMsg.classList.remove('hidden');
+
+                setTimeout(() => {
+                    window.location.href = '/contractor';
+                }, 1500);
+            } else {
+                throw new Error(data.message || 'Registration failed');
+            }
+        } catch (error) {
+            errorMsg.textContent = error.message;
+            errorMsg.classList.remove('hidden');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Create Contractor Account';
+        }
+    });
+</script>
+</body>
+</html>

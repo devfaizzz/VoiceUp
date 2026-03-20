@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contractor Dashboard - VoiceUp</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/contractor.css">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+
+<div class="contractor-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-brand">
+            <h1>🏗️ Contractor</h1>
+            <p>VoiceUp Partner Portal</p>
+        </div>
+
+        <nav class="sidebar-nav">
+            <a href="#" data-page="dashboard" class="active" onclick="showPage('dashboard', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                Dashboard
+            </a>
+            <a href="#" data-page="available" onclick="showPage('available', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                Available Issues
+            </a>
+            <a href="#" data-page="my-bids" onclick="showPage('my-bids', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                My Bids
+            </a>
+            <a href="#" data-page="projects" onclick="showPage('projects', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                Active Projects
+            </a>
+            <a href="#" data-page="completed" onclick="showPage('completed', this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                Completed
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <div class="user-avatar" id="userAvatar">C</div>
+                <div class="user-details">
+                    <div class="user-name" id="userName">Contractor</div>
+                    <div class="user-role">Partner</div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Area -->
+    <div class="main-area">
+        <header class="top-header">
+            <div>
+                <div class="page-title" id="pageTitle">Dashboard</div>
+                <div class="page-subtitle" id="pageSubtitle">Overview of your contractor activities</div>
+            </div>
+            <div class="header-actions">
+                <button type="button" class="logout-btn" onclick="contractorLogout()">
+                    <span>🚪</span> Logout
+                </button>
+            </div>
+        </header>
+
+        <div class="content-area">
+            <!-- Accepted Bid Congratulations Banner (shown when applicable) -->
+            <div id="congratsBanner" class="congrats-banner hidden">
+                <h2>🎉 Congratulations!</h2>
+                <p>Your bid has been accepted by the government. Please complete this task within the given time to stand out for future projects.</p>
+            </div>
+
+            <!-- Dashboard Page -->
+            <div id="page-dashboard" class="page-section active">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon blue">📋</div>
+                        <div class="stat-value" id="statTotalBids">0</div>
+                        <div class="stat-label">Total Bids</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon green">✓</div>
+                        <div class="stat-value" id="statAccepted">0</div>
+                        <div class="stat-label">Accepted Bids</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon purple">🏆</div>
+                        <div class="stat-value" id="statCompleted">0</div>
+                        <div class="stat-label">Completed Projects</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon amber">⭐</div>
+                        <div class="stat-value" id="statRating">0.0</div>
+                        <div class="stat-label">Average Rating</div>
+                    </div>
+                </div>
+
+                <div class="glass-card">
+                    <div class="card-header">
+                        <h3>Recent Activity</h3>
+                    </div>
+                    <div class="card-body">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Issue</th>
+                                    <th>Category</th>
+                                    <th>Bid Amount</th>
+                                    <th>Status</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recentActivityTable">
+                                <tr>
+                                    <td colspan="5" class="empty-state">Loading...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Available Issues Page -->
+            <div id="page-available" class="page-section">
+                <div class="glass-card">
+                    <div class="card-header">
+                        <h3>Available Issues for Bidding</h3>
+                        <button class="btn btn-outline btn-sm" onclick="loadAvailableIssues()">
+                            🔄 Refresh
+                        </button>
+                    </div>
+                </div>
+                <div class="issue-grid" id="availableIssuesGrid">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📋</div>
+                        <p>Loading available issues...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- My Bids Page -->
+            <div id="page-my-bids" class="page-section">
+                <div class="glass-card">
+                    <div class="card-header">
+                        <h3>My Bids</h3>
+                        <div style="display:flex;gap:8px;">
+                            <select id="bidStatusFilter" class="form-input" style="width:auto;" onchange="loadMyBids()" aria-label="Filter bids by status" title="Filter bids by status">
+                                <option value="">All Status</option>
+                                <option value="pending">Pending</option>
+                                <option value="accepted">Accepted</option>
+                                <option value="rejected">Rejected</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Issue</th>
+                                    <th>Category</th>
+                                    <th>Bid Amount</th>
+                                    <th>Days</th>
+                                    <th>Deadline</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="myBidsTable">
+                                <tr>
+                                    <td colspan="7" class="empty-state">Loading...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Projects Page -->
+            <div id="page-projects" class="page-section">
+                <div class="glass-card">
+                    <div class="card-header">
+                        <h3>Active Projects</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="activeProjectsList">
+                            <div class="empty-state">
+                                <div class="empty-state-icon">🔧</div>
+                                <p>Loading active projects...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Completed Projects Page -->
+            <div id="page-completed" class="page-section">
+                <div class="glass-card">
+                    <div class="card-header">
+                        <h3>Completed Projects</h3>
+                    </div>
+                    <div class="card-body">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Issue</th>
+                                    <th>Category</th>
+                                    <th>Amount</th>
+                                    <th>Completed</th>
+                                    <th>Payment Status</th>
+                                    <th>Rating</th>
+                                </tr>
+                            </thead>
+                            <tbody id="completedProjectsTable">
+                                <tr>
+                                    <td colspan="6" class="empty-state">Loading...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bid Modal -->
+<div id="bidModal" class="modal-overlay">
+    <div class="modal-content">
+        <!-- Form State -->
+        <div id="bidFormState">
+            <div class="modal-header">
+                <h3>Place Your Bid</h3>
+                <button type="button" class="modal-close" onclick="closeBidModal()">&times;</button>
+            </div>
+            <form id="bidForm">
+                <input type="hidden" id="bidIssueId">
+                <div id="bidIssueDetails" style="margin-bottom:16px;padding:12px;background:#f8fafc;border-radius:8px;">
+                    Loading issue details...
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Bid Amount (₹) *</label>
+                    <input type="number" id="bidAmount" class="form-input" placeholder="Enter your bid amount" required min="1">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Raw Material Cost (₹)</label>
+                    <input type="number" id="rawMaterialCost" class="form-input" placeholder="Cost breakdown for raw materials" min="0">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Completion Days *</label>
+                    <input type="number" id="bidDays" class="form-input" placeholder="Number of days to complete" required min="1">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="bidDeadline">Completion Deadline *</label>
+                    <input type="date" id="bidDeadline" class="form-input" required aria-label="Completion deadline" title="Completion deadline">
+                </div>
+                <div id="bidError" class="hidden" style="color:#ef4444;font-size:14px;margin-bottom:12px;padding:10px;background:rgba(239,68,68,0.1);border-radius:8px;"></div>
+                <div style="display:flex;gap:12px;">
+                    <button type="button" class="btn btn-outline" style="flex:1;" onclick="closeBidModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" style="flex:1;" id="submitBidBtn">Submit Bid</button>
+                </div>
+            </form>
+        </div>
+        <!-- Success State -->
+        <div id="bidSuccessState" style="display:none;text-align:center;padding:20px 0;">
+            <div class="bid-success-icon">✓</div>
+            <h3 style="margin:20px 0 12px;font-size:20px;font-weight:700;color:var(--success);">Bid Successfully Placed!</h3>
+            <p style="color:var(--text-muted);font-size:14px;margin-bottom:24px;">Your bid has been submitted. You will be notified if it's accepted.</p>
+            <button type="button" class="btn btn-primary" onclick="closeBidModal()">Done</button>
+        </div>
+    </div>
+</div>
+
+<!-- Work Completion Modal -->
+<div id="workModal" class="modal-overlay">
+    <div class="modal-content" style="max-width:600px;">
+        <div class="modal-header">
+            <h3>Submit Work Completion</h3>
+            <button class="modal-close" onclick="closeWorkModal()">&times;</button>
+        </div>
+        <form id="workForm" enctype="multipart/form-data">
+            <input type="hidden" id="workBidId">
+            <div class="form-group">
+                <label class="form-label" for="beforeImages">Before Images</label>
+                <div class="file-upload-area" onclick="document.getElementById('beforeImages').click()">
+                    <input type="file" id="beforeImages" accept="image/*" multiple class="hidden" aria-label="Upload before images" title="Upload before images">
+                    <div>📷 Click to upload before images</div>
+                </div>
+                <div class="file-preview" id="beforePreview"></div>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="afterImages">After Images *</label>
+                <div class="file-upload-area" onclick="document.getElementById('afterImages').click()">
+                    <input type="file" id="afterImages" accept="image/*" multiple class="hidden" required aria-label="Upload after images" title="Upload after images">
+                    <div>📷 Click to upload after images (required)</div>
+                </div>
+                <div class="file-preview" id="afterPreview"></div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Notes</label>
+                <textarea id="workNotes" class="form-input" rows="3" placeholder="Describe the work completed..."></textarea>
+            </div>
+            <div id="workError" class="hidden" style="color:#ef4444;font-size:14px;margin-bottom:12px;"></div>
+            <div style="display:flex;gap:12px;">
+                <button type="button" class="btn btn-outline" style="flex:1;" onclick="closeWorkModal()">Cancel</button>
+                <button type="submit" class="btn btn-success" style="flex:1;" id="submitWorkBtn">✓ Complete Work</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Payment Request Modal -->
+<div id="paymentModal" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Request Payment</h3>
+            <button class="modal-close" onclick="closePaymentModal()">&times;</button>
+        </div>
+        <input type="hidden" id="paymentBidId">
+        <div style="text-align:center;padding:20px 0;">
+            <div style="font-size:48px;margin-bottom:16px;">📍</div>
+            <p style="color:#64748b;margin-bottom:16px;">You must be within 500 meters of the work site to request payment.</p>
+            <div id="paymentLocationStatus" style="padding:12px;background:#f8fafc;border-radius:8px;margin-bottom:16px;">
+                Click the button below to verify your location.
+            </div>
+            <div id="paymentError" class="hidden" style="color:#ef4444;font-size:14px;margin-bottom:12px;"></div>
+            <button class="btn btn-success" style="width:100%;" id="verifyPaymentBtn" onclick="requestPaymentWithLocation()">
+                📍 Verify Location & Request Payment
+            </button>
+        </div>
+    </div>
+</div>
+
+<script src="js/auth.js"></script>
+<script src="js/contractor.js"></script>
+</body>
+</html>
