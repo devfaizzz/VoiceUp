@@ -529,21 +529,26 @@ async function loadMyReports() {
   const list = document.getElementById('reportsList');
   if (!list) return;
   try {
-    const res = await fetch('/api/issues/my-issues', { headers: authHeader() });
-    if (!res.ok) throw new Error('fail');
-    const data = await res.json();
+    let q = '';
+    try {
+      const anonIds = JSON.parse(localStorage.getItem('voiceup_anon_issues') || '[]');
+      if (anonIds && anonIds.length > 0) {
+        q = '?ids=' + anonIds.join(',');
+      }
+    } catch (e) { }
+
+    const res = await fetch('/api/issues/my-issues' + q, { headers: authHeader() });
+    if (!res.ok) {
+      if (res.status === 401) console.warn('Unauthorized: Please log in to see your user-associated reports');
+      else throw new Error('Failed to fetch user issues');
+    }
+
+    const data = res.ok ? await res.json() : [];
     window.myIssues = data.issues || data || [];
     renderReportsList(window.myIssues, list, 5);
-  } catch {
-    // Friendly placeholder when backend unreachable
-    window.myIssues = [
-      { _id: '1', title: 'Streetlight not working', category: 'streetlight', priority: 'high', status: 'approved', createdAt: '2024-04-24T00:00:00Z', voiceCoins: 35, location: { address: '123 Main St, Anytown', coordinates: [77.2090, 28.6139] } },
-      { _id: '2', title: 'Large pothole', category: 'pothole', priority: 'medium', status: 'in_progress', createdAt: '2024-04-20T00:00:00Z', voiceCoins: 20, location: { address: '456 Park Ave, Delhi', coordinates: [77.21, 28.61] } },
-      { _id: '3', title: 'Overflowing trash bin', category: 'garbage', priority: 'low', status: 'rejected', createdAt: '2024-04-18T00:00:00Z', voiceCoins: 10, location: { address: '789 Lake Rd, Mumbai', coordinates: [72.83, 18.96] } },
-      { _id: '4', title: 'Water leakage on Elm St', category: 'water', priority: 'high', status: 'approved', createdAt: '2024-04-15T00:00:00Z', voiceCoins: 25, location: { address: 'Elm Street, Bengaluru', coordinates: [77.59, 12.97] } },
-      { _id: '5', title: 'Broken swing in park', category: 'infrastructure', priority: 'medium', status: 'resolved', createdAt: '2024-04-10T00:00:00Z', voiceCoins: 40, location: { address: 'City Park, Chennai', coordinates: [13.08, 80.27] } },
-      { _id: '6', title: 'Illegal parking', category: 'traffic', priority: 'low', status: 'new', createdAt: '2024-04-05T00:00:00Z', voiceCoins: 15, location: { address: 'MG Road, Pune', coordinates: [18.52, 73.85] } }
-    ];
+  } catch (err) {
+    console.error('Error loading my reports:', err);
+    window.myIssues = [];
     renderReportsList(window.myIssues, list, 5);
   }
 }
@@ -913,6 +918,16 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       const json = await res.json();
       if (res.ok) {
+        // Track anonymously submitted issues locally
+        if (json.id) {
+          try {
+            let anonIds = JSON.parse(localStorage.getItem('voiceup_anon_issues') || '[]');
+            if (!anonIds.includes(json.id)) {
+              anonIds.push(json.id);
+              localStorage.setItem('voiceup_anon_issues', JSON.stringify(anonIds));
+            }
+          } catch (e) { }
+        }
         showToast(`✅ Report submitted! AI Priority: ${json.priority || 'medium'}`, 'success');
 
         // Show AI reason alert if available

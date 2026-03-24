@@ -25,9 +25,10 @@ class AnalyticsService {
 
       if (validRecents.length > 0) {
         const totalMs = validRecents.reduce((acc, iss) => {
-          const start = new Date(iss.createdAt);
-          const end = new Date(iss.resolution?.resolvedAt || iss.updatedAt);
-          return acc + (end - start);
+          const start = new Date(iss.createdAt).getTime();
+          const end = new Date(iss.resolution?.resolvedAt || iss.updatedAt).getTime();
+          const diff = end - start;
+          return isNaN(diff) ? acc : acc + diff;
         }, 0);
         avgResolutionDays = (totalMs / validRecents.length) / (1000 * 60 * 60 * 24);
       } else {
@@ -37,9 +38,10 @@ class AnalyticsService {
       // Calculate Trust Score (Formula based on resolution rate and speed)
       // Base score 50. + (Resolution % * 40). + (Speed bonus up to 10 for resolving under 7 days)
       const resolutionRate = totalIssues > 0 ? (resolvedIssues / totalIssues) : 0;
-      const speedBonus = Math.max(0, 10 - (avgResolutionDays * 1.5)); // 0 if > ~6.6 days, max 10
+      const speedBonus = Math.max(0, 10 - ((isNaN(avgResolutionDays) ? 0 : avgResolutionDays) * 1.5));
 
       let trustScore = 50 + (resolutionRate * 40) + speedBonus;
+      if (isNaN(trustScore)) trustScore = 50;
       trustScore = Math.min(100, Math.max(0, Math.round(trustScore))); // clamp 0-100
 
       // Execution status

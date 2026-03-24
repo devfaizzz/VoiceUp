@@ -126,9 +126,37 @@ const createIssue = async (req, res) => {
 };
 
 const getMyIssues = async (req, res) => {
-  const userId = req.user?._id || req.user?.id;
-  const issues = await Issue.find({ reportedBy: userId }).sort({ createdAt: -1 }).lean();
-  return res.status(200).json({ issues });
+  try {
+    const userId = req.user?._id || req.user?.id;
+    let issues = [];
+
+    if (userId) {
+      issues = await Issue.find({ reportedBy: userId }).sort({ createdAt: -1 }).lean();
+    }
+
+    // Also include anonymous issues if their IDs are passed from local storage
+    if (req.query.ids) {
+      const ids = req.query.ids.split(',').filter(id => /^[0-9a-fA-F]{24}$/.test(id));
+      if (ids.length > 0) {
+        const anonIssues = await Issue.find({ _id: { $in: ids } }).sort({ createdAt: -1 }).lean();
+
+        if (userId) {
+          const mainIds = new Set(issues.map(i => i._id.toString()));
+          for (const a of anonIssues) {
+            if (!mainIds.has(a._id.toString())) issues.push(a);
+          }
+          issues.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        } else {
+          issues = anonIssues;
+        }
+      }
+    }
+
+    return res.status(200).json({ issues });
+  } catch (err) {
+    console.error('getMyIssues error:', err);
+    return res.status(500).json({ message: 'Error retrieving issues' });
+  }
 };
 
 const getIssueById = async (req, res) => {
@@ -232,7 +260,7 @@ const assignIssue = async (req, res) => {
   try {
     const issue = await Issue.findById(req.params.id);
     if (!issue) return res.status(404).json({ message: 'Issue not found' });
-    
+
     // Assign department
     if (req.body.assignee) {
       issue.assignedTo = {
@@ -243,9 +271,10 @@ const assignIssue = async (req, res) => {
     } else {
       issue.assignedTo = null;
     }
-    
+
+    issue.markModified('assignedTo');
     await issue.save();
-    return res.status(200).json({ id: issue._id, assignee: issue.assignedTo });
+    return res.status(200).json({ id: issue._id, assignee: issue.assignedTo, status: issue.status });
   } catch (err) {
     console.error('assignIssue error:', err);
     return res.status(500).json({ message: 'Failed to assign issue' });

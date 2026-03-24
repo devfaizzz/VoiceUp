@@ -513,6 +513,9 @@ window.selectAssignment = async function (itemBtn) {
   const panel = wrap ? wrap.querySelector('.assigned-dropdown-panel') : null;
   const labelEl = wrap ? wrap.querySelector('.assigned-label') : null;
   const avatarEl = wrap ? wrap.querySelector('.assigned-avatar') : null;
+  const previousLabel = labelEl ? labelEl.textContent : 'Unassigned';
+  const previousAvatar = avatarEl ? avatarEl.textContent : '—';
+  const previousUnassigned = avatarEl ? avatarEl.classList.contains('unassigned') : true;
 
   if (panel) panel.classList.remove('open');
   if (trigger) trigger.setAttribute('aria-expanded', 'false');
@@ -529,14 +532,24 @@ window.selectAssignment = async function (itemBtn) {
   }
 
   try {
-    await fetch(`/api/issues/${issueId}/assign`, {
+    const response = await fetch(`/api/issues/${issueId}/assign`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...adminAuthHeader() },
       body: JSON.stringify({ assignee: assignId ? { department: assignId, name: assignName } : null })
     });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.message || 'Failed to assign issue');
+    }
     if (typeof loadAll === 'function') loadAll();
   } catch (e) {
     console.error('Assign failed', e);
+    if (labelEl) labelEl.textContent = previousLabel;
+    if (avatarEl) {
+      avatarEl.textContent = previousAvatar;
+      avatarEl.classList.toggle('unassigned', previousUnassigned);
+    }
+    showAdminToast(e.message || 'Failed to assign issue', 'error');
   }
 };
 
@@ -1055,6 +1068,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     } catch (e) {
       console.error('Trust Load error:', e);
+      const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+      setEl('trustScoreVal', '--');
+      setEl('trustSpeedVal', '--');
+      setEl('trustRateVal', '--');
+      const lbl = document.getElementById('trustStatusLabel');
+      if (lbl) {
+        lbl.textContent = 'Unable to load';
+        lbl.style.color = '#ef4444';
+      }
     }
   }
 

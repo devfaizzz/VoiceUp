@@ -172,9 +172,12 @@ router.post('/bid', authenticateContractor, async (req, res) => {
     req.contractor.statistics.totalBids += 1;
     await req.contractor.save();
 
-    // Update issue status to bidding_open if it was just sent
-    if (issue.contractorAssignment.status === 'sent_to_contractors') {
-      issue.contractorAssignment.status = 'bidding_open';
+    // Ensure the admin panel can surface the bids action once any bid exists.
+    const contractorAssignment = issue.contractorAssignment || {};
+    if (contractorAssignment.status === 'sent_to_contractors' || contractorAssignment.status === 'none' || !contractorAssignment.status) {
+      contractorAssignment.status = 'bidding_open';
+      contractorAssignment.sentAt = contractorAssignment.sentAt || new Date();
+      issue.contractorAssignment = contractorAssignment;
       await issue.save();
     }
 

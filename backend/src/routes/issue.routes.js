@@ -42,10 +42,13 @@ router.post('/ai-structure',
 // Temporarily make status updates open for demo (will secure later)
 router.put('/:id/status', issueController.updateIssueStatus);
 
+// Allow fetching my issues with or without token (uses optionalAuth and query params for anonymous)
+router.get('/my-issues', optionalAuth, issueController.getMyIssues);
+
 // Protected routes (require authentication)
 router.use(authenticateToken);
 
-router.get('/my-issues', issueController.getMyIssues);
+router.get('/my-issues', authenticateToken, issueController.getMyIssues);
 router.get('/:id', issueController.getIssueById);
 router.put('/:id', issueController.updateIssue);
 router.delete('/:id', issueController.deleteIssue);
