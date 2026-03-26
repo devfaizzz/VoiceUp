@@ -12,7 +12,7 @@ const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 // Public routes
 router.get('/public', issueController.getPublicIssues);
 router.get('/public/:id', issueController.getPublicIssueById);
-router.get('/nearby', issueController.getNearbyIssues);
+router.get('/nearby', authenticateToken, issueController.getNearbyIssues);
 router.get('/stats', issueController.getIssueStatistics);
 
 // Submission route (no auth required for now; will attach user if present)
@@ -39,25 +39,25 @@ router.post('/ai-structure',
   issueController.structureIssueText
 );
 
-// Temporarily make status updates open for demo (will secure later)
-router.put('/:id/status', issueController.updateIssueStatus);
-
 // Allow fetching my issues with or without token (uses optionalAuth and query params for anonymous)
 router.get('/my-issues', optionalAuth, issueController.getMyIssues);
 
 // Protected routes (require authentication)
 router.use(authenticateToken);
 
-router.get('/my-issues', authenticateToken, issueController.getMyIssues);
+router.put('/:id/status', authorize(['admin', 'staff']), issueController.updateIssueStatus);
+router.get('/my-issues', issueController.getMyIssues);
 router.get('/:id', issueController.getIssueById);
 router.put('/:id', issueController.updateIssue);
 router.delete('/:id', issueController.deleteIssue);
 
 // Issue interactions
 router.post('/:id/comment', issueController.addComment);
-router.post('/:id/upvote', issueController.toggleUpvote);
+router.post('/:id/upvote', issueController.upvoteIssue);
+router.post('/:id/view', issueController.incrementViewCount);
 router.post('/:id/feedback', issueController.submitFeedback);
 router.post('/:id/reminder', issueController.sendReminder);
+router.post('/:id/citizen-response', issueController.respondToWorkVerification);
 
 router.put('/:id/assign', authorize(['admin', 'staff']), issueController.assignIssue);
 

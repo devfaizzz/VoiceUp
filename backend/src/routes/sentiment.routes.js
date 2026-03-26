@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const { authorize } = require('../middleware/auth');
+const { authenticateToken, authorize } = require('../middleware/auth');
 const sentimentService = require('../ai/sentimentService');
 
 // Admin only route
-router.get('/dashboard', authorize(['admin', 'staff']), async (req, res) => {
+router.get('/dashboard', authenticateToken, authorize(['admin', 'staff']), async (req, res) => {
     try {
         const report = await sentimentService.generateSentimentReport();
         return res.status(200).json(report);

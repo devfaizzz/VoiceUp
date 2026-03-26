@@ -46,6 +46,8 @@ connectDB();
 // Initialize AI classifier
 const classifier = require('./ai/classificationService');
 classifier.initialize();
+const sentimentService = require('./ai/sentimentService');
+sentimentService.initialize();
 
 // Rate limiting
 const limiter = rateLimit({
@@ -121,6 +123,11 @@ io.on('connection', (socket) => {
   socket.on('join-room', (userId) => {
     socket.join(`user-${userId}`);
     logger.info(`User ${userId} joined room`);
+  });
+
+  socket.on('join', (roomOrUserId) => {
+    const room = String(roomOrUserId || '');
+    socket.join(room.startsWith('user-') ? room : `user-${room}`);
   });
 
   // Join contractor room

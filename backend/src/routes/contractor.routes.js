@@ -398,6 +398,13 @@ router.post('/bid/:bidId/complete', authenticateContractor, upload.fields([
       publicId: file.filename || file.key
     }));
 
+    if (beforeImages.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one before image is required'
+      });
+    }
+
     if (afterImages.length === 0) {
       return res.status(400).json({
         success: false,
@@ -414,7 +421,11 @@ router.post('/bid/:bidId/complete', authenticateContractor, upload.fields([
         type: 'Point',
         coordinates: contractorCoords
       },
-      notes
+      notes,
+      distanceFromIssue: Math.round(distance),
+      adminReview: {
+        status: 'pending'
+      }
     };
     bid.status = 'completed';
     await bid.save();
@@ -422,7 +433,8 @@ router.post('/bid/:bidId/complete', authenticateContractor, upload.fields([
     // Update issue status
     await Issue.findByIdAndUpdate(bid.issue._id, {
       'contractorAssignment.status': 'completed',
-      'contractorAssignment.completedAt': new Date()
+      'contractorAssignment.completedAt': new Date(),
+      'citizenFeedback.status': 'none'
     });
 
     // Update contractor statistics

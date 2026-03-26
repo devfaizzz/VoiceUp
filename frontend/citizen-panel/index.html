@@ -221,6 +221,14 @@
       <div id="reportsList"></div>
     </div>
 
+    <div class="glass-card nearby-issues-card">
+      <div class="section-header">
+        <span class="section-title">Nearby Issues</span>
+        <span class="section-meta" id="nearbyRadiusLabel">Radius: 5 km</span>
+      </div>
+      <div id="nearbyIssuesList"></div>
+    </div>
+
   </div>
 </div>
 
@@ -271,6 +279,11 @@
           </div>
         </div>
 
+        <div class="detail-actions-row">
+          <button class="detail-upvote-btn" id="detailUpvoteBtn">Upvote This Issue</button>
+          <span class="detail-action-note" id="detailUpvoteNote">One upvote per citizen.</span>
+        </div>
+
         <!-- Timeline track -->
         <div class="timeline-section" style="margin-top:20px;">
           <div class="timeline-label">Report Timeline</div>
@@ -309,6 +322,15 @@
           <span style="font-size:1.3rem;">📣</span>
           <p>You can remind officials about this report since it's been over 24 hours.</p>
           <button class="reminder-send-btn" id="sendReminderBtn">Send Reminder</button>
+        </div>
+
+        <div class="verification-card" id="citizenVerificationCard" style="display:none;">
+          <span style="font-size:1.3rem;">🛠</span>
+          <p id="citizenVerificationText">Admin verified the work. Please confirm whether you are satisfied.</p>
+          <div class="verification-actions">
+            <button class="verification-btn success" id="citizenSatisfiedBtn">Satisfied</button>
+            <button class="verification-btn danger" id="citizenNotSatisfiedBtn">Not Satisfied</button>
+          </div>
         </div>
       </div>
 

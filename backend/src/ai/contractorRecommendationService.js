@@ -49,8 +49,12 @@ class ContractorRecommendationService {
           completedProjects: c.statistics?.completedProjects || 0,
           acceptedBids: c.statistics?.acceptedBids || 0,
           averageRating: c.statistics?.averageRating || 0,
+          averageQualityRating: c.statistics?.averageQualityRating || 0,
+          averageTimeRating: c.statistics?.averageTimeRating || 0,
+          averageCostRating: c.statistics?.averageCostRating || 0,
           totalRatings: c.statistics?.totalRatings || 0,
-          totalBids: c.statistics?.totalBids || 0
+          totalBids: c.statistics?.totalBids || 0,
+          efficiencyScore: c.statistics?.efficiencyScore || 0
         },
         location: c.location?.address || 'N/A'
       };
@@ -163,10 +167,10 @@ RESPOND IN EXACTLY THIS JSON FORMAT (no markdown, no code blocks):
     const scored = contractorProfiles.map(c => {
       let score = 0;
 
-      // Rating (0-30 points)
+      // Rating quality (0-25 points)
       score += (c.stats.averageRating / 5) * 30;
 
-      // Experience — completed projects (0-25 points)
+      // Experience - completed projects (0-20 points)
       const maxProjects = Math.max(...contractorProfiles.map(p => p.stats.completedProjects), 1);
       score += (c.stats.completedProjects / maxProjects) * 25;
 
@@ -176,11 +180,19 @@ RESPOND IN EXACTLY THIS JSON FORMAT (no markdown, no code blocks):
         score += ((maxDist - c.distanceKm) / maxDist) * 20;
       }
 
-      // Success rate (0-15 points)
+      // Efficiency and success rate (0-15 points)
       const successRate = c.stats.acceptedBids > 0
         ? (c.stats.completedProjects / c.stats.acceptedBids) * 100
         : 0;
       score += (successRate / 100) * 15;
+
+      // Detailed category ratings (0-10 points)
+      const categoryAverage = (
+        (c.stats.averageQualityRating || c.stats.averageRating || 0) +
+        (c.stats.averageTimeRating || c.stats.averageRating || 0) +
+        (c.stats.averageCostRating || c.stats.averageRating || 0)
+      ) / 3;
+      score += (categoryAverage / 5) * 10;
 
       // Verification (0-10 points)
       if (c.isVerified) score += 10;

@@ -1,75 +1,155 @@
+const mongoose = require('mongoose');
 const Issue = require('../models/Issue');
 const User = require('../models/User');
+const Bid = require('../models/Bid');
 const classifier = require('../ai/classificationService');
+const sentimentService = require('../ai/sentimentService');
+const { calculateDistance, isValidCoordinates } = require('../utils/locationUtils');
+const { calculatePriority, normalizePriority } = require('../utils/issuePriority');
 
-// ─── Voice Coin amounts ───────────────────────────────────────────────────────
 const COIN_REWARDS = {
-  new: 50,   // initial submission
+  new: 50,
   approved: 100,
   rejected: 20,
   resolved: 150,
   in_progress: 10,
-  acknowledged: 10
+  acknowledged: 10,
+  satisfied: 75
 };
 
-// Helper: award/update coins on user
+function getUserId(req) {
+  return req.user?._id || req.user?.id || null;
+}
+
+function sanitizeIssue(issue, currentUserId) {
+  if (!issue) return issue;
+  const normalized = typeof issue.toObject === 'function' ? issue.toObject() : { ...issue };
+  normalized.upvoteCount = normalized.upvoteCount ?? normalized.upvotes?.length ?? 0;
+  normalized.hasUpvoted = currentUserId
+    ? (normalized.upvotes || []).some((id) => id.toString() === currentUserId.toString())
+    : false;
+  return normalized;
+}
+
 async function awardCoins(userId, issue, newStatus) {
   if (!userId) return;
   const reward = COIN_REWARDS[newStatus];
   if (!reward) return;
-  try {
-    // Only award if transition hasn't given coins for this status yet
-    const alreadyRewarded = issue.notifications?.some(
-      n => n.type === 'in_app' && n.message && n.message.includes(`coins:${newStatus}`)
-    );
-    if (alreadyRewarded) return;
 
-    await User.findByIdAndUpdate(userId, { $inc: { voiceCoins: reward } });
+  const alreadyRewarded = issue.notifications?.some(
+    (item) => item.type === 'in_app' && item.message && item.message.includes(`coins:${newStatus}`)
+  );
+  if (alreadyRewarded) return;
 
-    // Mark reward given
-    issue.notifications = issue.notifications || [];
-    issue.notifications.push({
-      type: 'in_app',
-      sentAt: new Date(),
-      status: 'sent',
-      message: `coins:${newStatus}:+${reward}`
-    });
-  } catch (e) {
-    console.error('awardCoins error:', e);
-  }
+  await User.findByIdAndUpdate(userId, { $inc: { voiceCoins: reward } });
+
+  issue.notifications = issue.notifications || [];
+  issue.notifications.push({
+    type: 'in_app',
+    sentAt: new Date(),
+    status: 'sent',
+    message: `coins:${newStatus}:+${reward}`
+  });
 }
 
-// ─── Controllers ─────────────────────────────────────────────────────────────
+async function recomputeIssuePriority(issue) {
+  issue.upvoteCount = issue.upvotes?.length || issue.upvoteCount || 0;
+  issue.priority = calculatePriority({
+    basePriority: issue.basePriority || issue.priority,
+    upvoteCount: issue.upvoteCount,
+    sentiment: (issue.sentiment?.label || 'Neutral').toLowerCase()
+  });
+}
+
+function ensureValidCoordinates(latitude, longitude) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  return isValidCoordinates(lat, lng) ? { lat, lng } : null;
+}
 
 const getPublicIssues = async (req, res) => {
-  const issues = await Issue.find({ isPublic: true }).sort({ createdAt: -1 }).limit(100).lean();
-  return res.status(200).json({ issues });
+  const currentUserId = getUserId(req);
+  const issues = await Issue.find({ isPublic: true })
+    .sort({ createdAt: -1 })
+    .limit(100)
+    .lean();
+
+  return res.status(200).json({
+    issues: issues.map((issue) => sanitizeIssue(issue, currentUserId))
+  });
 };
 
 const getPublicIssueById = async (req, res) => {
   try {
     const issue = await Issue.findById(req.params.id).lean();
     if (!issue) return res.status(404).json({ message: 'Issue not found' });
-    return res.status(200).json(issue); // Return issue object directly to match contractor.js expectations
-  } catch {
+    return res.status(200).json(sanitizeIssue(issue, getUserId(req)));
+  } catch (error) {
     return res.status(404).json({ message: 'Issue not found' });
   }
 };
 
 const getNearbyIssues = async (req, res) => {
-  return res.status(200).json({ issues: [], message: 'Nearby issues placeholder' });
+  try {
+    const coords = ensureValidCoordinates(req.query.latitude, req.query.longitude);
+    if (!coords) {
+      return res.status(400).json({ message: 'Valid latitude and longitude are required' });
+    }
+
+    const radius = Math.min(Math.max(Number(req.query.radius) || 5000, 100), 20000);
+    const currentUserId = getUserId(req);
+
+    const issues = await Issue.find({
+      isPublic: true,
+      location: {
+        $near: {
+          $geometry: {
+            type: 'Point',
+            coordinates: [coords.lng, coords.lat]
+          },
+          $maxDistance: radius
+        }
+      }
+    })
+      .sort({ priority: -1, upvoteCount: -1, createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    const enriched = issues.map((issue) => {
+      const distance = issue.location?.coordinates
+        ? Math.round(calculateDistance([coords.lng, coords.lat], issue.location.coordinates))
+        : null;
+      return {
+        ...sanitizeIssue(issue, currentUserId),
+        distance
+      };
+    });
+
+    return res.status(200).json({ issues: enriched, radius });
+  } catch (error) {
+    console.error('getNearbyIssues error:', error);
+    return res.status(500).json({ message: 'Failed to fetch nearby issues' });
+  }
 };
 
 const getIssueStatistics = async (req, res) => {
-  return res.status(200).json({ stats: {} });
+  const [total, open, resolved] = await Promise.all([
+    Issue.countDocuments(),
+    Issue.countDocuments({ status: { $nin: ['resolved', 'closed', 'rejected'] } }),
+    Issue.countDocuments({ status: { $in: ['resolved', 'closed'] } })
+  ]);
+
+  return res.status(200).json({ stats: { total, open, resolved } });
 };
 
 const createIssue = async (req, res) => {
   try {
-    const userId = (req.user?._id || req.user?.id) || null;
-    const { title, description, category, latitude, longitude, address, imageBase64 } = req.body;
-    if (!title || !description || !category || !latitude || !longitude) {
-      return res.status(400).json({ message: 'Missing fields' });
+    const userId = getUserId(req);
+    const { title, description, category, latitude, longitude, address, area, city, postalCode, imageBase64 } = req.body;
+
+    const coords = ensureValidCoordinates(latitude, longitude);
+    if (!title || !description || !category || !coords) {
+      return res.status(400).json({ message: 'Missing required fields' });
     }
 
     let imageBuffer = null;
@@ -78,15 +158,33 @@ const createIssue = async (req, res) => {
       imageBuffer = Buffer.from(base64Data, 'base64');
     }
 
-    const ai = await classifier.classify(
-      imageBuffer, title, description, category,
-      Number(longitude), Number(latitude)
-    );
+    const [ai, sentiment] = await Promise.all([
+      classifier.classify(
+        imageBuffer,
+        title,
+        description,
+        category,
+        coords.lng,
+        coords.lat
+      ),
+      Promise.resolve(sentimentService.analyzeText(description))
+    ]);
 
+    const basePriority = normalizePriority(ai.priority);
     const issue = await Issue.create({
-      title, description, category,
-      priority: ai.priority,
-      location: { type: 'Point', coordinates: [Number(longitude), Number(latitude)], address },
+      title,
+      description,
+      category,
+      priority: calculatePriority({ basePriority, sentiment: sentiment.label.toLowerCase() }),
+      basePriority,
+      location: {
+        type: 'Point',
+        coordinates: [coords.lng, coords.lat],
+        address,
+        area,
+        city,
+        postalCode
+      },
       reportedBy: userId,
       aiClassification: {
         category,
@@ -94,57 +192,68 @@ const createIssue = async (req, res) => {
         suggestedPriority: ai.priority,
         reason: ai.aiReason,
         processedAt: new Date()
+      },
+      sentiment: {
+        label: sentiment.label,
+        score: sentiment.score,
+        analyzedAt: new Date()
       }
     });
 
-    // Award 50 coins for submitting
     if (userId) {
       await User.findByIdAndUpdate(userId, {
         $inc: { voiceCoins: COIN_REWARDS.new, 'statistics.totalReports': 1 }
       });
-      issue.notifications = [{ type: 'in_app', sentAt: new Date(), status: 'sent', message: `coins:new:+${COIN_REWARDS.new}` }];
+      issue.notifications = [{
+        type: 'in_app',
+        sentAt: new Date(),
+        status: 'sent',
+        message: `coins:new:+${COIN_REWARDS.new}`
+      }];
       await issue.save();
     }
 
     req.app.get('io').emit('issue:new', {
-      id: issue._id, title: issue.title, category: issue.category,
-      status: issue.status, priority: issue.priority
+      id: issue._id,
+      title: issue.title,
+      category: issue.category,
+      status: issue.status,
+      priority: issue.priority
     });
 
     return res.status(201).json({
       id: issue._id,
-      priority: ai.priority,
+      priority: issue.priority,
       severity: ai.severity,
       duplicateCount: ai.duplicateCount,
       aiReason: ai.aiReason,
-      coinsAwarded: COIN_REWARDS.new
+      coinsAwarded: COIN_REWARDS.new,
+      sentiment: issue.sentiment
     });
-  } catch (err) {
-    console.error('Create issue error:', err);
+  } catch (error) {
+    console.error('Create issue error:', error);
     return res.status(500).json({ message: 'Failed to create issue' });
   }
 };
 
 const getMyIssues = async (req, res) => {
   try {
-    const userId = req.user?._id || req.user?.id;
+    const userId = getUserId(req);
     let issues = [];
 
     if (userId) {
       issues = await Issue.find({ reportedBy: userId }).sort({ createdAt: -1 }).lean();
     }
 
-    // Also include anonymous issues if their IDs are passed from local storage
     if (req.query.ids) {
-      const ids = req.query.ids.split(',').filter(id => /^[0-9a-fA-F]{24}$/.test(id));
+      const ids = req.query.ids.split(',').filter((id) => mongoose.Types.ObjectId.isValid(id));
       if (ids.length > 0) {
         const anonIssues = await Issue.find({ _id: { $in: ids } }).sort({ createdAt: -1 }).lean();
-
         if (userId) {
-          const mainIds = new Set(issues.map(i => i._id.toString()));
-          for (const a of anonIssues) {
-            if (!mainIds.has(a._id.toString())) issues.push(a);
-          }
+          const currentIds = new Set(issues.map((issue) => issue._id.toString()));
+          anonIssues.forEach((issue) => {
+            if (!currentIds.has(issue._id.toString())) issues.push(issue);
+          });
           issues.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
         } else {
           issues = anonIssues;
@@ -152,19 +261,28 @@ const getMyIssues = async (req, res) => {
       }
     }
 
-    return res.status(200).json({ issues });
-  } catch (err) {
-    console.error('getMyIssues error:', err);
+    return res.status(200).json({
+      issues: issues.map((issue) => sanitizeIssue(issue, userId))
+    });
+  } catch (error) {
+    console.error('getMyIssues error:', error);
     return res.status(500).json({ message: 'Error retrieving issues' });
   }
 };
 
 const getIssueById = async (req, res) => {
   try {
-    const issue = await Issue.findById(req.params.id).lean();
+    const issue = await Issue.findById(req.params.id);
     if (!issue) return res.status(404).json({ message: 'Issue not found' });
-    return res.status(200).json({ issue });
-  } catch {
+
+    const userId = getUserId(req);
+    const ownsIssue = issue.reportedBy && userId && issue.reportedBy.toString() === userId.toString();
+    if (!issue.isPublic && !ownsIssue && req.user?.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    return res.status(200).json({ issue: sanitizeIssue(issue, userId) });
+  } catch (error) {
     return res.status(404).json({ message: 'Issue not found' });
   }
 };
@@ -178,18 +296,78 @@ const deleteIssue = async (req, res) => {
 };
 
 const addComment = async (req, res) => {
-  return res.status(201).json({ id: req.params.id, message: 'Comment added (stub)' });
+  try {
+    const userId = getUserId(req);
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ message: 'Comment text is required' });
+
+    const issue = await Issue.findById(req.params.id);
+    if (!issue) return res.status(404).json({ message: 'Issue not found' });
+
+    await issue.addComment(userId, text);
+    return res.status(201).json({ message: 'Comment added', issue: sanitizeIssue(issue, userId) });
+  } catch (error) {
+    console.error('addComment error:', error);
+    return res.status(500).json({ message: 'Failed to add comment' });
+  }
 };
 
-const toggleUpvote = async (req, res) => {
-  return res.status(200).json({ id: req.params.id, upvoted: true });
+const upvoteIssue = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const issue = await Issue.findById(req.params.id);
+    if (!issue) return res.status(404).json({ message: 'Issue not found' });
+
+    const alreadyUpvoted = issue.upvotes.some((id) => id.toString() === userId.toString());
+    if (alreadyUpvoted) {
+      return res.status(200).json({
+        message: 'Issue already upvoted',
+        issue: sanitizeIssue(issue, userId)
+      });
+    }
+
+    issue.upvotes.push(userId);
+    await recomputeIssuePriority(issue);
+    await issue.save();
+
+    req.app.get('io').emit('issue:updated', {
+      id: issue._id,
+      upvoteCount: issue.upvoteCount,
+      priority: issue.priority
+    });
+
+    return res.status(200).json({
+      message: 'Upvote recorded',
+      issue: sanitizeIssue(issue, userId)
+    });
+  } catch (error) {
+    console.error('upvoteIssue error:', error);
+    return res.status(500).json({ message: 'Failed to upvote issue' });
+  }
+};
+
+const incrementViewCount = async (req, res) => {
+  try {
+    const issue = await Issue.findByIdAndUpdate(
+      req.params.id,
+      { $inc: { viewCount: 1 } },
+      { new: true }
+    );
+
+    if (!issue) return res.status(404).json({ message: 'Issue not found' });
+    return res.status(200).json({
+      issue: sanitizeIssue(issue, getUserId(req))
+    });
+  } catch (error) {
+    console.error('incrementViewCount error:', error);
+    return res.status(500).json({ message: 'Failed to track issue view' });
+  }
 };
 
 const submitFeedback = async (req, res) => {
   return res.status(201).json({ id: req.params.id, message: 'Feedback submitted (stub)' });
 };
 
-// Award coins when admin changes status
 const updateIssueStatus = async (req, res) => {
   try {
     const { status } = req.body;
@@ -199,10 +377,8 @@ const updateIssueStatus = async (req, res) => {
     const prevStatus = issue.status;
     issue.status = status;
 
-    // Award coins to reporter
     if (issue.reportedBy && prevStatus !== status) {
       await awardCoins(issue.reportedBy, issue, status);
-      // Also update resolved count in stats
       if (status === 'resolved' || status === 'closed') {
         await User.findByIdAndUpdate(issue.reportedBy, {
           $inc: { 'statistics.resolvedReports': 1 }
@@ -212,32 +388,28 @@ const updateIssueStatus = async (req, res) => {
 
     await issue.save();
 
-    // Realtime to user
     if (issue.reportedBy) {
       req.app.get('io').to(`user-${issue.reportedBy}`).emit('issue:status', {
-        id: issue._id, status: issue.status,
+        id: issue._id,
+        status: issue.status,
         coinsAwarded: COIN_REWARDS[status] || 0
       });
     }
-    // Realtime to all admins
-    req.app.get('io').emit('issue:updated', { id: issue._id, status: issue.status });
 
+    req.app.get('io').emit('issue:updated', { id: issue._id, status: issue.status });
     return res.status(200).json({ id: issue._id, status: issue.status, coinsAwarded: COIN_REWARDS[status] || 0 });
-  } catch (err) {
-    console.error('updateIssueStatus error:', err);
+  } catch (error) {
+    console.error('updateIssueStatus error:', error);
     return res.status(500).json({ message: 'Failed to update status' });
   }
 };
 
-// Reminder from citizen → pushes to admin notification panel via Socket.io
 const sendReminder = async (req, res) => {
   try {
     const issue = await Issue.findById(req.params.id).lean();
     if (!issue) return res.status(404).json({ message: 'Issue not found' });
 
     const userName = req.user?.name || 'A citizen';
-
-    // Emit to admin panel via socket (admin listens on 'admin:reminder')
     req.app.get('io').emit('admin:reminder', {
       id: issue._id,
       title: issue.title,
@@ -245,13 +417,13 @@ const sendReminder = async (req, res) => {
       status: issue.status,
       priority: issue.priority,
       reportedBy: userName,
-      message: `${userName} sent a reminder for "${issue.title}" — please review this issue.`,
+      message: `${userName} sent a reminder for "${issue.title}".`,
       sentAt: new Date().toISOString()
     });
 
     return res.status(200).json({ message: 'Reminder sent to admin.' });
-  } catch (err) {
-    console.error('sendReminder error:', err);
+  } catch (error) {
+    console.error('sendReminder error:', error);
     return res.status(500).json({ message: 'Failed to send reminder' });
   }
 };
@@ -261,28 +433,38 @@ const assignIssue = async (req, res) => {
     const issue = await Issue.findById(req.params.id);
     if (!issue) return res.status(404).json({ message: 'Issue not found' });
 
-    // Assign department
-    if (req.body.assignee) {
-      issue.assignedTo = {
+    issue.assignedTo = req.body.assignee
+      ? {
         department: req.body.assignee.department,
         name: req.body.assignee.name,
         assignedAt: new Date()
-      };
-    } else {
-      issue.assignedTo = null;
-    }
+      }
+      : null;
 
     issue.markModified('assignedTo');
     await issue.save();
     return res.status(200).json({ id: issue._id, assignee: issue.assignedTo, status: issue.status });
-  } catch (err) {
-    console.error('assignIssue error:', err);
+  } catch (error) {
+    console.error('assignIssue error:', error);
     return res.status(500).json({ message: 'Failed to assign issue' });
   }
 };
 
 const updatePriority = async (req, res) => {
-  return res.status(200).json({ id: req.params.id, priority: req.body.priority || 'medium' });
+  try {
+    const priority = normalizePriority(req.body.priority);
+    const issue = await Issue.findById(req.params.id);
+    if (!issue) return res.status(404).json({ message: 'Issue not found' });
+
+    issue.basePriority = priority;
+    await recomputeIssuePriority(issue);
+    await issue.save();
+
+    return res.status(200).json({ id: issue._id, priority: issue.priority, basePriority: issue.basePriority });
+  } catch (error) {
+    console.error('updatePriority error:', error);
+    return res.status(500).json({ message: 'Failed to update priority' });
+  }
 };
 
 const resolveIssue = async (req, res) => {
@@ -290,28 +472,22 @@ const resolveIssue = async (req, res) => {
     const issue = await Issue.findById(req.params.id);
     if (!issue) return res.status(404).json({ message: 'Issue not found' });
 
+    const wasResolved = issue.status === 'resolved';
     issue.status = 'resolved';
 
-    // Process uploaded resolution images 
-    const resolutionImages = [];
-    if (req.files && req.files.length > 0) {
-      req.files.forEach(file => {
-        resolutionImages.push({
-          url: file.path,
-          publicId: file.filename || file.public_id
-        });
-      });
-    }
+    const resolutionImages = (req.files || []).map((file) => ({
+      url: file.path,
+      publicId: file.filename || file.public_id
+    }));
 
     issue.resolution = {
       resolvedAt: new Date(),
-      resolvedBy: req.user?._id || req.user?.id || null,
+      resolvedBy: getUserId(req),
       resolutionNotes: req.body.resolutionNotes || 'Resolved by admin',
       resolutionImages
     };
 
-    // If report has reporter, award coins 
-    if (issue.reportedBy && issue.status !== 'resolved') {
+    if (issue.reportedBy && !wasResolved) {
       await awardCoins(issue.reportedBy, issue, 'resolved');
       await User.findByIdAndUpdate(issue.reportedBy, {
         $inc: { 'statistics.resolvedReports': 1 }
@@ -320,32 +496,98 @@ const resolveIssue = async (req, res) => {
 
     await issue.save();
 
-    // Trigger realtime updates
     if (issue.reportedBy) {
       req.app.get('io').to(`user-${issue.reportedBy}`).emit('issue:status', {
-        id: issue._id, status: issue.status,
-        coinsAwarded: COIN_REWARDS['resolved'] || 0
+        id: issue._id,
+        status: issue.status,
+        coinsAwarded: COIN_REWARDS.resolved || 0
       });
     }
-    req.app.get('io').emit('issue:updated', { id: issue._id, status: issue.status });
 
+    req.app.get('io').emit('issue:updated', { id: issue._id, status: issue.status });
     return res.status(200).json({ id: issue._id, message: 'Issue resolved successfully', issue });
-  } catch (err) {
-    console.error('Resolve issue error:', err);
+  } catch (error) {
+    console.error('Resolve issue error:', error);
     return res.status(500).json({ message: 'Failed to resolve issue' });
   }
 };
 
+const respondToWorkVerification = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { decision, comment } = req.body;
+    if (!['satisfied', 'not_satisfied'].includes(decision)) {
+      return res.status(400).json({ message: 'Decision must be satisfied or not_satisfied' });
+    }
+
+    const issue = await Issue.findById(req.params.id);
+    if (!issue) return res.status(404).json({ message: 'Issue not found' });
+    if (!issue.reportedBy || issue.reportedBy.toString() !== userId.toString()) {
+      return res.status(403).json({ message: 'Only the reporting citizen can respond' });
+    }
+    if (issue.citizenFeedback?.status !== 'pending') {
+      return res.status(400).json({ message: 'This issue is not awaiting citizen verification' });
+    }
+
+    issue.citizenFeedback.status = decision;
+    issue.citizenFeedback.comment = comment || '';
+    issue.citizenFeedback.respondedAt = new Date();
+
+    if (decision === 'satisfied') {
+      issue.status = 'closed';
+      issue.citizenFeedback.rewardCoins = COIN_REWARDS.satisfied;
+      await User.findByIdAndUpdate(userId, { $inc: { voiceCoins: COIN_REWARDS.satisfied } });
+      issue.notifications = issue.notifications || [];
+      issue.notifications.push({
+        type: 'in_app',
+        sentAt: new Date(),
+        status: 'sent',
+        message: `coins:satisfied:+${COIN_REWARDS.satisfied}`
+      });
+    } else {
+      issue.status = 'in_progress';
+      issue.contractorAssignment.status = 'work_in_progress';
+    }
+
+    await issue.save();
+    return res.status(200).json({ message: 'Citizen response recorded', issue: sanitizeIssue(issue, userId) });
+  } catch (error) {
+    console.error('respondToWorkVerification error:', error);
+    return res.status(500).json({ message: 'Failed to record response' });
+  }
+};
+
 const getCategoryDistribution = async (req, res) => {
-  return res.status(200).json({ distribution: {} });
+  const distribution = await Issue.aggregate([
+    { $group: { _id: '$category', count: { $sum: 1 } } }
+  ]);
+  return res.status(200).json({ distribution });
 };
 
 const getResolutionTimeStats = async (req, res) => {
-  return res.status(200).json({ resolutionTime: {} });
+  const resolvedIssues = await Issue.find({
+    status: { $in: ['resolved', 'closed'] },
+    'resolution.resolvedAt': { $exists: true }
+  }).select('createdAt resolution.resolvedAt');
+
+  const values = resolvedIssues.map((issue) => {
+    const createdAt = new Date(issue.createdAt).getTime();
+    const resolvedAt = new Date(issue.resolution.resolvedAt).getTime();
+    return (resolvedAt - createdAt) / (1000 * 60 * 60 * 24);
+  });
+
+  const average = values.length
+    ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1))
+    : 0;
+
+  return res.status(200).json({ resolutionTime: { averageDays: average, sampleSize: values.length } });
 };
 
 const getIssueHeatmap = async (req, res) => {
-  return res.status(200).json({ heatmap: [] });
+  const heatmap = await Issue.find({ 'location.coordinates.0': { $exists: true } })
+    .select('location priority upvoteCount category')
+    .lean();
+  return res.status(200).json({ heatmap });
 };
 
 const batchClassifyIssues = async (req, res) => {
@@ -356,7 +598,6 @@ const batchUpdateStatus = async (req, res) => {
   return res.status(200).json({ updated: 0 });
 };
 
-// ─── Voice Transcription (Groq Whisper) ──────────────────────────────────────
 const transcribeAudio = async (req, res) => {
   try {
     if (!req.file || !req.file.buffer) {
@@ -365,13 +606,12 @@ const transcribeAudio = async (req, res) => {
 
     const result = await classifier.transcribe(req.file.buffer, req.file.originalname || 'audio.webm');
     return res.status(200).json({ text: result.text });
-  } catch (err) {
-    console.error('Transcription error:', err);
-    return res.status(500).json({ message: 'Transcription failed: ' + err.message });
+  } catch (error) {
+    console.error('Transcription error:', error);
+    return res.status(500).json({ message: `Transcription failed: ${error.message}` });
   }
 };
 
-// ─── AI Structuring ──────────────────────────────────────────────────────────
 const structureIssueText = async (req, res) => {
   try {
     const { rawText, imageBase64 } = req.body;
@@ -385,17 +625,37 @@ const structureIssueText = async (req, res) => {
 
     const structured = await classifier.structureInput(rawText, imageBuffer);
     return res.status(200).json(structured);
-  } catch (err) {
-    console.error('Structurer error:', err);
+  } catch (error) {
+    console.error('Structurer error:', error);
     return res.status(500).json({ message: 'Structuring failed' });
   }
 };
 
 module.exports = {
-  getPublicIssues, getPublicIssueById, getNearbyIssues, getIssueStatistics,
-  createIssue, getMyIssues, getIssueById, updateIssue, deleteIssue,
-  addComment, toggleUpvote, submitFeedback, updateIssueStatus, sendReminder,
-  assignIssue, updatePriority, resolveIssue,
-  getCategoryDistribution, getResolutionTimeStats, getIssueHeatmap,
-  batchClassifyIssues, batchUpdateStatus, transcribeAudio, structureIssueText
+  getPublicIssues,
+  getPublicIssueById,
+  getNearbyIssues,
+  getIssueStatistics,
+  createIssue,
+  getMyIssues,
+  getIssueById,
+  updateIssue,
+  deleteIssue,
+  addComment,
+  upvoteIssue,
+  incrementViewCount,
+  submitFeedback,
+  updateIssueStatus,
+  sendReminder,
+  assignIssue,
+  updatePriority,
+  resolveIssue,
+  respondToWorkVerification,
+  getCategoryDistribution,
+  getResolutionTimeStats,
+  getIssueHeatmap,
+  batchClassifyIssues,
+  batchUpdateStatus,
+  transcribeAudio,
+  structureIssueText
 };

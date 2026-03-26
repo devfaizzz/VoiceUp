@@ -1,101 +1,122 @@
-const Groq = require('groq-sdk');
 const Issue = require('../models/Issue');
 const logger = require('../utils/logger');
 
+const POSITIVE_WORDS = [
+  'good', 'great', 'thanks', 'thank', 'resolved', 'fixed', 'clean',
+  'helpful', 'fast', 'safe', 'improved', 'working', 'better', 'smooth'
+];
+
+const NEGATIVE_WORDS = [
+  'bad', 'worst', 'angry', 'dirty', 'broken', 'danger', 'dangerous',
+  'leak', 'overflow', 'pothole', 'delay', 'stuck', 'smell', 'unsafe',
+  'urgent', 'frustrated', 'frustrating', 'garbage', 'dark', 'issue',
+  'problem', 'blocked', 'damaged', 'sewage', 'flood', 'crack'
+];
+
 class SentimentService {
-    constructor() {
-        this.groq = null;
+  initialize() {
+    logger.info('Sentiment Service initialized (rule-based)');
+  }
+
+  analyzeText(text = '') {
+    const normalized = String(text || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .trim();
+
+    if (!normalized) {
+      return { label: 'Neutral', score: 0, positiveHits: 0, negativeHits: 0 };
     }
 
-    initialize() {
-        const apiKey = process.env.GROQ_API_KEY;
-        if (!apiKey) {
-            logger.warn('GROQ_API_KEY not set — Sentiment Analysis will be disabled/mocked.');
-            return;
-        }
-        this.groq = new Groq({ apiKey });
-        logger.info('Sentiment Service initialized (Groq Llama 3.3)');
-    }
+    const words = normalized.split(/\s+/);
+    let positiveHits = 0;
+    let negativeHits = 0;
 
-    /**
-     * Generates a sentiment report based on recent issues and comments
-     */
-    async generateSentimentReport() {
-        if (!this.groq) {
-            return this._mockSentimentData();
-        }
+    words.forEach((word) => {
+      if (POSITIVE_WORDS.includes(word)) positiveHits += 1;
+      if (NEGATIVE_WORDS.includes(word)) negativeHits += 1;
+    });
 
-        try {
-            // Fetch textual data from recent issues to gauge sentiment
-            const recentIssues = await Issue.find()
-                .sort({ createdAt: -1 })
-                .limit(30)
-                .select('title description category comments priority status createdAt')
-                .lean();
+    const score = positiveHits - negativeHits;
+    let label = 'Neutral';
+    if (score >= 2) label = 'Positive';
+    if (score <= -2) label = 'Negative';
 
-            if (recentIssues.length === 0) return this._mockSentimentData();
+    return { label, score, positiveHits, negativeHits };
+  }
 
-            const textCorpus = recentIssues.map(i => {
-                let text = `Issue [${i.category}]: ${i.title}. ${i.description}. Status: ${i.status}.`;
-                if (i.comments && i.comments.length > 0) {
-                    text += ` Comments: ${i.comments.map(c => c.text).join(' | ')}`;
-                }
-                return text;
-            }).join('\n\n');
+  async generateSentimentReport() {
+    const issues = await Issue.find()
+      .sort({ createdAt: -1 })
+      .limit(250)
+      .select('sentiment category location.area location.address createdAt')
+      .lean();
 
-            const prompt = `You are an AI analyzing public sentiment for a local government dashboard based on the latest civic issues reported by citizens. 
+    const totalIssues = issues.length;
+    const counts = { Positive: 0, Neutral: 0, Negative: 0 };
+    const areaMap = new Map();
 
-Here are the recent reports and comments:
----
-${textCorpus.substring(0, 4000)}
----
+    issues.forEach((issue) => {
+      const label = issue.sentiment?.label || 'Neutral';
+      counts[label] = (counts[label] || 0) + 1;
 
-Based on these reports, analyze the public sentiment and extract key insights.
-Respond ONLY with valid JSON in this exact structure:
-{
-  "overallScore": <number 0 to 100, where 100 is extremely positive/high trust, and 0 is extremely negative/angry>,
-  "sentiment": "<Positive | Neutral | Negative | Frustrated>",
-  "trendingTopics": [
-    {"topic": "<1-2 words>", "volume": <number 1-100>}
-  ],
-  "misinformationFlags": [
-    {"claim": "<short description of potential fake rumor>", "risk": "<Low | Medium | High>"}
-  ],
-  "summary": "<1-2 sentences summarizing citizen mood>"
-}`;
+      const area = issue.location?.area || issue.location?.address || 'Unknown Area';
+      if (!areaMap.has(area)) {
+        areaMap.set(area, { area, total: 0, Positive: 0, Neutral: 0, Negative: 0 });
+      }
 
-            const completion = await this.groq.chat.completions.create({
-                model: 'llama-3.3-70b-versatile',
-                messages: [{ role: 'user', content: prompt }],
-                temperature: 0.1,
-                max_tokens: 400
-            });
+      const stats = areaMap.get(area);
+      stats.total += 1;
+      stats[label] += 1;
+    });
 
-            const text = completion.choices[0]?.message?.content?.trim() || '';
-            const clean = text.replace(/```json\s*/g, '').replace(/```/g, '').trim();
-            return JSON.parse(clean);
+    const overallScore = totalIssues === 0
+      ? 50
+      : Math.max(
+        0,
+        Math.min(
+          100,
+          Math.round((((counts.Positive * 2) + counts.Neutral) / (Math.max(totalIssues, 1) * 2)) * 100)
+        )
+      );
 
-        } catch (err) {
-            logger.error('Sentiment generation failed:', err.message);
-            return this._mockSentimentData();
-        }
-    }
+    let sentiment = 'Neutral';
+    if (counts.Negative > counts.Positive && counts.Negative >= counts.Neutral) sentiment = 'Negative';
+    if (counts.Positive > counts.Negative && counts.Positive >= counts.Neutral) sentiment = 'Positive';
 
-    _mockSentimentData() {
-        return {
-            overallScore: 68,
-            sentiment: "Moderately Frustrated",
-            trendingTopics: [
-                { topic: "Potholes", volume: 85 },
-                { topic: "Streetlights", volume: 60 },
-                { topic: "Water leak", volume: 45 }
-            ],
-            misinformationFlags: [
-                { claim: "Water supply poisoned in Sector 4", risk: "High" }
-            ],
-            summary: "Citizens are primarily concerned about road infrastructure, but showing appreciation for recent streetlight fixes."
-        };
-    }
+    const trendingTopics = [
+      { topic: 'Negative issues', volume: totalIssues ? Math.round((counts.Negative / totalIssues) * 100) : 0 },
+      { topic: 'Neutral issues', volume: totalIssues ? Math.round((counts.Neutral / totalIssues) * 100) : 0 },
+      { topic: 'Positive issues', volume: totalIssues ? Math.round((counts.Positive / totalIssues) * 100) : 0 }
+    ];
+
+    const areaWiseSentiment = Array.from(areaMap.values())
+      .map((stats) => ({
+        area: stats.area,
+        total: stats.total,
+        positivePercent: stats.total ? Math.round((stats.Positive / stats.total) * 100) : 0,
+        neutralPercent: stats.total ? Math.round((stats.Neutral / stats.total) * 100) : 0,
+        negativePercent: stats.total ? Math.round((stats.Negative / stats.total) * 100) : 0
+      }))
+      .sort((a, b) => b.negativePercent - a.negativePercent)
+      .slice(0, 6);
+
+    const negativePercentage = totalIssues ? Math.round((counts.Negative / totalIssues) * 100) : 0;
+
+    return {
+      overallScore,
+      sentiment,
+      summary: totalIssues
+        ? `${negativePercentage}% of recent issues are negative. ${areaWiseSentiment[0]?.area || 'No area'} currently shows the strongest negative trend.`
+        : 'No issues available yet for sentiment analysis.',
+      trendingTopics,
+      misinformationFlags: [],
+      distribution: counts,
+      negativePercentage,
+      areaWiseSentiment,
+      totalIssues
+    };
+  }
 }
 
 module.exports = new SentimentService();
