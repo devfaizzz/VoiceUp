@@ -1,4 +1,4 @@
-# 🚀 VoiceUp – AI-Powered Civic Intelligence & Leadership Support System
+<img width="977" height="472" alt="image" src="https://github.com/user-attachments/assets/5cafcb8d-ecd8-480b-a6c2-025e132eba88" /># 🚀 VoiceUp – AI-Powered Civic Intelligence & Leadership Support System
 
 VoiceUp is an AI-driven civic issue and decision-support platform designed to empower **local leaders, municipal authorities, and citizens** by transforming unstructured public grievances into actionable insights.
 
@@ -106,7 +106,7 @@ VoiceUp enables local leaders to:
 ### Frontend
 
 * HTML, Tailwind CSS, JavaScript
-* Leaflet (Maps integration)
+* Google maps API (Maps integration)
 * Chart.js (Analytics dashboards)
 
 ### Backend
@@ -118,10 +118,6 @@ VoiceUp enables local leaders to:
 
 * MongoDB (Mongoose)
 
-### Cloud & Storage
-
-* Cloudinary / AWS S3
-
 ### APIs
 
 * REST APIs
@@ -130,6 +126,102 @@ VoiceUp enables local leaders to:
 
 * Image-based issue classification
 * NLP-based sentiment analysis
+
+---
+
+# ⚡ Installation & Setup Guide
+
+Follow these steps to run the project locally:
+
+## 📦 1. Clone the Repository
+
+```bash
+git clone https://github.com/your-username/VoiceUp.git
+cd VoiceUp
+```
+
+---
+
+## 🛠️ 2. Backend Setup
+
+```bash
+cd backend
+npm install
+```
+
+### ▶️ Run Backend Server
+
+```bash
+npm run dev
+```
+
+👉 Server will run on: `http://localhost:5000`
+`/admin --> admin route`
+`/contractor --> contractor route`
+
+---
+
+## 🎨 3. Frontend Setup
+
+### Citizen Panel
+
+```bash
+cd frontend/citizen-panel
+npm install
+npm run dev
+```
+
+### Admin Panel
+
+```bash
+cd ../admin-panel
+npm install
+npm run dev
+```
+
+👉 Frontend will run on: `http://localhost:5000` (or given port)
+
+---
+
+## 🔐 4. Environment Variables
+
+Create a `.env` file inside the backend folder:
+
+```env
+MONGO_URI=your_mongodb_connection
+PORT=5000
+JWT_SECRET=your_secret_key
+CLOUDINARY_URL=your_cloudinary_config
+```
+
+---
+
+## 🧠 5. Install Dependencies (Important)
+
+If dependencies are missing, run:
+
+```bash
+npm install
+```
+
+👉 This will automatically install all required packages from `package.json`.
+
+---
+
+## 📊 6. Run Full Project
+
+* Start backend server
+* Start both frontend panels
+* Open browser and test features
+
+---
+
+# 🎯 Notes
+
+* Ensure MongoDB is running
+* Do not include `.env` in public repo
+* Use `.env.example` for reference
+* If port conflicts occur, change ports in config --> 5000
 
 ---
 
