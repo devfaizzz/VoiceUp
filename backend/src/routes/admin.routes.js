@@ -32,8 +32,15 @@ router.get('/issue/:id/details', async (req, res) => {
 
     // Get accepted bid with work proof if exists
     let acceptedBidDetails = null;
-    if (issue.contractorAssignment?.acceptedBid) {
-      acceptedBidDetails = await Bid.findById(issue.contractorAssignment.acceptedBid)
+    const acceptedBidId = issue.contractorAssignment?.acceptedBid;
+    if (acceptedBidId) {
+      acceptedBidDetails = await Bid.findById(acceptedBidId)
+        .populate('contractor', 'name email phone statistics location profilePicture');
+    }
+
+    if (!acceptedBidDetails) {
+      acceptedBidDetails = await Bid.findOne({ issue: req.params.id })
+        .sort({ updatedAt: -1, createdAt: -1 })
         .populate('contractor', 'name email phone statistics location profilePicture');
     }
 

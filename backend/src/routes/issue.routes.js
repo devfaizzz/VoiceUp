@@ -12,16 +12,12 @@ const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 // Public routes
 router.get('/public', issueController.getPublicIssues);
 router.get('/public/:id', issueController.getPublicIssueById);
-router.get('/nearby', authenticateToken, issueController.getNearbyIssues);
+router.get('/nearby', optionalAuth, issueController.getNearbyIssues);
 router.get('/stats', issueController.getIssueStatistics);
 
 // Submission route (no auth required for now; will attach user if present)
 router.post('/',
   optionalAuth,
-  upload.fields([
-    { name: 'images', maxCount: 5 },
-    { name: 'audio', maxCount: 1 }
-  ]),
   validateIssue,
   issueController.createIssue
 );

@@ -49,7 +49,7 @@ class SentimentService {
     const issues = await Issue.find()
       .sort({ createdAt: -1 })
       .limit(250)
-      .select('sentiment category location.area location.address createdAt')
+      .select('title sentiment category location.area location.address location.city createdAt')
       .lean();
 
     const totalIssues = issues.length;
@@ -60,7 +60,7 @@ class SentimentService {
       const label = issue.sentiment?.label || 'Neutral';
       counts[label] = (counts[label] || 0) + 1;
 
-      const area = issue.location?.area || issue.location?.address || 'Unknown Area';
+      const area = this.getAreaLabel(issue);
       if (!areaMap.has(area)) {
         areaMap.set(area, { area, total: 0, Positive: 0, Neutral: 0, Negative: 0 });
       }
@@ -118,5 +118,20 @@ class SentimentService {
     };
   }
 }
+
+SentimentService.prototype.getAreaLabel = function(issue) {
+  const area = issue.location?.area;
+  if (area && !/^lat[:\s]/i.test(area)) return area;
+
+  const city = issue.location?.city;
+  if (city && !/^lat[:\s]/i.test(city)) return city;
+
+  const address = issue.location?.address || '';
+  if (address && !/^lat[:\s]/i.test(address)) {
+    return address.split(',').slice(0, 2).join(',').trim();
+  }
+
+  return issue.title ? `Cluster near "${issue.title}"` : 'Reported cluster';
+};
 
 module.exports = new SentimentService();
