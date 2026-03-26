@@ -1263,6 +1263,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
   tableBody?.addEventListener('click', handleStatusClick);
   document.getElementById('issuesPageTableBody')?.addEventListener('click', handleStatusClick);
+  document.getElementById('issuesPageTableBody')?.addEventListener('click', function (e) {
+    const viewBtn = e.target.closest(`button[onclick*="openReportDetail"]`);
+    if (viewBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const match = viewBtn.getAttribute('onclick')?.match(/openReportDetail\('([^']+)'\)/);
+      if (match?.[1]) {
+        openReportDetail(match[1]);
+      }
+      return;
+    }
+
+    const completionBtn = e.target.closest(`button[onclick*="openCompletionView"]`);
+    if (completionBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const match = completionBtn.getAttribute('onclick')?.match(/openCompletionView\('([^']+)'\)/);
+      if (match?.[1]) {
+        openCompletionView(match[1]);
+      }
+    }
+  });
 
   // ── Saved filter buttons ──
   document.getElementById('filterAll')?.addEventListener('click', () => { savedFilter = 'all'; renderSaved(); });
@@ -1567,6 +1589,81 @@ function showAdminToast(message, type = 'info') {
   }, 4000);
 }
 
+function showAdminOverlayModal(modal) {
+  if (!modal) return;
+  modal.style.display = 'flex';
+  modal.classList.add('show');
+}
+
+function hideAdminOverlayModal(modal) {
+  if (!modal) return;
+  modal.classList.remove('show');
+  modal.style.display = 'none';
+}
+
+async function parseAdminResponseSafe(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: text };
+  }
+}
+
+function formatAadhaarNumber(value) {
+  if (!value) return 'N/A';
+  const digits = String(value).replace(/\D/g, '');
+  if (digits.length !== 12) return value;
+  return `${digits.slice(0, 4)} ${digits.slice(4, 8)} ${digits.slice(8)}`;
+}
+
+function formatContractorWorkflowStatus(issue, bid) {
+  const assignmentStatus = issue?.contractorAssignment?.status || 'none';
+  const reviewStatus = bid?.workProof?.adminReview?.status;
+
+  if (assignmentStatus === 'paid' || bid?.status === 'paid') return 'Payment Approved';
+  if (assignmentStatus === 'payment_pending' || reviewStatus === 'verified') return 'Verified by Admin';
+  if (bid?.status === 'completed' && reviewStatus !== 'verified') return 'Pending Admin Verification';
+  if (assignmentStatus === 'work_in_progress' || bid?.status === 'work_in_progress') return 'Work In Progress';
+  if (assignmentStatus === 'bid_accepted' || bid?.status === 'accepted') return 'Bid Accepted';
+  if (assignmentStatus === 'bidding_open') return 'Awaiting Bids';
+  if (assignmentStatus === 'sent_to_contractors') return 'Sent to Contractors';
+  return assignmentStatus.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'Not Assigned';
+}
+
+function renderAdminImageStrip(images, emptyText, placeholderColor = '#f8fafc') {
+  if (!images || images.length === 0) {
+    return `<div style="padding:24px;border-radius:10px;background:${placeholderColor};color:#94a3b8;text-align:center;">${emptyText}</div>`;
+  }
+
+  return `
+    <div class="rd-images">
+      ${images.map(img => `<img src="${img.url}" alt="Image" onerror="this.style.display='none'">`).join('')}
+    </div>
+  `;
+}
+
+function renderPastRatings(pastProjects = []) {
+  const ratedProjects = pastProjects.filter(project => project?.rating).slice(0, 3);
+  if (ratedProjects.length === 0) {
+    return '<div class="rd-value">No past ratings recorded yet.</div>';
+  }
+
+  return ratedProjects.map(project => `
+    <div style="padding:12px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
+        <div>
+          <div style="font-weight:700;color:#1e293b;">${project.issueId?.title || 'Previous project'}</div>
+          <div style="font-size:12px;color:#64748b;">${project.completedAt ? new Date(project.completedAt).toLocaleDateString() : 'Completion date unavailable'}</div>
+        </div>
+        <div style="font-weight:800;color:#f59e0b;">⭐ ${Number(project.rating).toFixed(1)}</div>
+      </div>
+      ${project.feedback ? `<div style="margin-top:8px;font-size:13px;color:#475569;">${project.feedback}</div>` : ''}
+    </div>
+  `).join('');
+}
+
 // ══════════════════════════════════════════════════════════════════
 // REPORT DETAIL & AI CONTRACTOR ASSIGNMENT FLOW
 // ══════════════════════════════════════════════════════════════════
@@ -1584,16 +1681,23 @@ window.openReportDetail = async function (issueId) {
   const modal = document.getElementById('reportDetailModal');
   const body = document.getElementById('rdBody');
   const title = document.getElementById('rdTitle');
-  modal.style.display = 'flex';
+  if (!modal || !body || !title) {
+    showAdminToast('Report detail modal is unavailable on this page.', 'error');
+    return;
+  }
+
+  showAdminOverlayModal(modal);
   body.innerHTML = '<div style="text-align:center;padding:40px;color:#64748b;">Loading report...</div>';
 
   try {
     const res = await adminFetch(`/api/admin/issue/${issueId}/details`);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message);
+    const data = await parseAdminResponseSafe(res);
+    if (!res.ok) throw new Error(data.message || 'Failed to load report details');
 
     const issue = data.issue;
     const acceptedBid = data.acceptedBidDetails;
+    const contractor = acceptedBid?.contractor || issue.contractorAssignment?.acceptedContractor || null;
+    const workProof = acceptedBid?.workProof || null;
     title.textContent = `Report: ${issue.title || 'Untitled'}`;
 
     const coords = issue.location?.coordinates || [];
@@ -1604,22 +1708,85 @@ window.openReportDetail = async function (issueId) {
       hold: '🟠 On Hold', in_progress: '🔵 In Progress', resolved: '✅ Resolved'
     };
 
-    // Build images HTML
-    let imagesHTML = '<span style="color:#94a3b8;">No images</span>';
-    if (issue.images && issue.images.length > 0) {
-      imagesHTML = `<div class="rd-images">${issue.images.map(img =>
-        `<img src="${img.url}" alt="Report image" onerror="this.style.display='none'">`
-      ).join('')}</div>`;
-    }
+    const imagesHTML = renderAdminImageStrip(issue.images, 'No report images uploaded');
 
     let contractorHTML = '<div class="rd-value">No contractor assigned yet.</div>';
-    if (acceptedBid?.contractor) {
+    if (contractor) {
       contractorHTML = `
-        <div class="rd-value">
-          <strong>${acceptedBid.contractor.name || 'Contractor'}</strong><br>
-          ${acceptedBid.contractor.email || ''}<br>
-          ${acceptedBid.contractor.phone || ''}<br>
-          Avg Rating: ${(acceptedBid.contractor.statistics?.averageRating || 0).toFixed(1)}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div style="padding:14px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;">
+            <div style="font-size:16px;font-weight:700;color:#1e293b;margin-bottom:6px;">${contractor.name || 'Contractor'}</div>
+            <div style="font-size:13px;color:#475569;line-height:1.7;">
+              <div><strong>Email:</strong> ${contractor.email || 'N/A'}</div>
+              <div><strong>Phone:</strong> ${contractor.phone || 'N/A'}</div>
+              <div><strong>Aadhaar:</strong> ${formatAadhaarNumber(contractor.aadhaarNumber)}</div>
+              <div><strong>Address:</strong> ${contractor.address || contractor.location?.address || 'N/A'}</div>
+              <div><strong>Status:</strong> ${contractor.isVerified ? 'Verified Contractor' : 'Pending verification'}</div>
+            </div>
+          </div>
+          <div style="padding:14px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;">
+            <div style="font-size:13px;color:#64748b;font-weight:700;margin-bottom:8px;">Performance Snapshot</div>
+            <div style="font-size:13px;color:#475569;line-height:1.8;">
+              <div><strong>Average Rating:</strong> ${(contractor.statistics?.averageRating || 0).toFixed(1)}</div>
+              <div><strong>Quality:</strong> ${(contractor.statistics?.averageQualityRating || 0).toFixed(1)}</div>
+              <div><strong>Time:</strong> ${(contractor.statistics?.averageTimeRating || 0).toFixed(1)}</div>
+              <div><strong>Cost:</strong> ${(contractor.statistics?.averageCostRating || 0).toFixed(1)}</div>
+              <div><strong>Completed Projects:</strong> ${contractor.statistics?.completedProjects || 0}</div>
+              <div><strong>Total Ratings:</strong> ${contractor.statistics?.totalRatings || 0}</div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:14px;">
+          <div class="rd-label">Past Ratings</div>
+          ${renderPastRatings(contractor.pastProjects || [])}
+        </div>
+      `;
+    }
+
+    let workCompletionHTML = '<div class="rd-value">No work completion has been submitted yet.</div>';
+    if (workProof) {
+      workCompletionHTML = `
+        <div style="padding:16px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+            <div>
+              <div class="rd-label">Work Status</div>
+              <div class="rd-value" style="font-weight:700;">${formatContractorWorkflowStatus(issue, acceptedBid)}</div>
+            </div>
+            <div>
+              <div class="rd-label">Submitted At</div>
+              <div class="rd-value">${workProof.submittedAt ? new Date(workProof.submittedAt).toLocaleString() : 'N/A'}</div>
+            </div>
+            <div>
+              <div class="rd-label">Distance Verification</div>
+              <div class="rd-value">${workProof.distanceFromIssue ? `${workProof.distanceFromIssue} meters from issue site` : 'Not recorded'}</div>
+            </div>
+            <div>
+              <div class="rd-label">Admin Review</div>
+              <div class="rd-value">${workProof.adminReview?.status ? workProof.adminReview.status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Pending'}</div>
+            </div>
+          </div>
+
+          ${workProof.notes ? `
+            <div style="margin-bottom:14px;padding:12px;background:#fff7ed;border:1px solid #fdba74;border-radius:10px;">
+              <div class="rd-label" style="color:#9a3412;">Contractor Notes</div>
+              <div class="rd-value" style="color:#7c2d12;">${workProof.notes}</div>
+            </div>
+          ` : ''}
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div>
+              <div class="rd-label">Before Images</div>
+              ${renderAdminImageStrip(workProof.beforeImages, 'No before images submitted')}
+            </div>
+            <div>
+              <div class="rd-label">After Images</div>
+              ${renderAdminImageStrip(workProof.afterImages, 'No after images submitted', '#f0fdf4')}
+            </div>
+          </div>
+
+          <button onclick="closeReportDetail(); openCompletionView('${issue._id}')" class="btn btn-success" style="width:100%;margin-top:16px;padding:12px;">
+            View Work Completion Details
+          </button>
         </div>
       `;
     }
@@ -1664,6 +1831,7 @@ window.openReportDetail = async function (issueId) {
       <div class="rd-field"><div class="rd-label">Location</div><div class="rd-value">📍 ${issue.location?.address || `Lat: ${lat}, Lng: ${lng}`}</div></div>
       <div class="rd-field"><div class="rd-label">Images</div>${imagesHTML}</div>
       <div class="rd-field"><div class="rd-label">Assigned Contractor</div>${contractorHTML}</div>
+      <div class="rd-field"><div class="rd-label">Work Completion Details</div>${workCompletionHTML}</div>
       ${actionHTML}
     `;
   } catch (err) {
@@ -1672,7 +1840,7 @@ window.openReportDetail = async function (issueId) {
 };
 
 window.closeReportDetail = function () {
-  document.getElementById('reportDetailModal').style.display = 'none';
+  hideAdminOverlayModal(document.getElementById('reportDetailModal'));
 };
 
 // ── AI Contractor Recommendation Flow ──
@@ -1684,7 +1852,7 @@ window.triggerAiRecommend = async function (issueId) {
   const results = document.getElementById('aiResultsState');
   const error = document.getElementById('aiErrorState');
 
-  modal.style.display = 'flex';
+  showAdminOverlayModal(modal);
   loading.style.display = 'block';
   results.style.display = 'none';
   error.style.display = 'none';
@@ -1749,20 +1917,20 @@ window.triggerAiRecommend = async function (issueId) {
 };
 
 window.closeAiRecommend = function () {
-  document.getElementById('aiRecommendModal').style.display = 'none';
+  hideAdminOverlayModal(document.getElementById('aiRecommendModal'));
 };
 
 // ── Completion View ──
 window.openCompletionView = async function (issueId) {
   const modal = document.getElementById('completionViewModal');
   const body = document.getElementById('completionViewBody');
-  modal.style.display = 'flex';
+  showAdminOverlayModal(modal);
   body.innerHTML = '<div style="text-align:center;padding:40px;color:#64748b;">Loading...</div>';
 
   try {
     const res = await adminFetch(`/api/admin/issue/${issueId}/details`);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message);
+    const data = await parseAdminResponseSafe(res);
+    if (!res.ok) throw new Error(data.message || 'Failed to load completion details');
 
     const issue = data.issue;
     const bid = data.acceptedBidDetails;
@@ -1774,6 +1942,7 @@ window.openCompletionView = async function (issueId) {
 
     const contractor = bid.contractor || {};
     const proof = bid.workProof;
+    const workflowStatus = formatContractorWorkflowStatus(issue, bid);
 
     body.innerHTML = `
       <div style="background:#f8fafc;padding:16px;border-radius:12px;margin-bottom:20px;">
@@ -1791,7 +1960,28 @@ window.openCompletionView = async function (issueId) {
         </div>
         <div>
           <div style="font-weight:700;color:#1e293b;">${contractor.name || 'Contractor'}</div>
-          <div style="font-size:13px;color:#64748b;">⭐ ${contractor.statistics?.averageRating?.toFixed(1) || '0.0'} • 🏆 ${contractor.statistics?.completedProjects || 0} projects</div>
+          <div style="font-size:13px;color:#64748b;">⭐ ${contractor.statistics?.averageRating?.toFixed(1) || '0.0'} • 🏆 ${contractor.statistics?.completedProjects || 0} projects • ${workflowStatus}</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;">
+        <div style="padding:14px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;">
+          <div class="rd-label">Contractor Identity</div>
+          <div class="rd-value">
+            <div><strong>Name:</strong> ${contractor.name || 'N/A'}</div>
+            <div><strong>Email:</strong> ${contractor.email || 'N/A'}</div>
+            <div><strong>Phone:</strong> ${contractor.phone || 'N/A'}</div>
+            <div><strong>Aadhaar:</strong> ${formatAadhaarNumber(contractor.aadhaarNumber)}</div>
+          </div>
+        </div>
+        <div style="padding:14px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;">
+          <div class="rd-label">Rating Snapshot</div>
+          <div class="rd-value">
+            <div><strong>Overall:</strong> ${(contractor.statistics?.averageRating || 0).toFixed(1)}</div>
+            <div><strong>Quality:</strong> ${(contractor.statistics?.averageQualityRating || 0).toFixed(1)}</div>
+            <div><strong>Time:</strong> ${(contractor.statistics?.averageTimeRating || 0).toFixed(1)}</div>
+            <div><strong>Cost:</strong> ${(contractor.statistics?.averageCostRating || 0).toFixed(1)}</div>
+          </div>
         </div>
       </div>
 
@@ -1822,9 +2012,22 @@ window.openCompletionView = async function (issueId) {
           <div style="font-size:12px;color:#64748b;font-weight:600;">BID AMOUNT</div>
           <div style="font-size:14px;color:#1e293b;margin-top:2px;">₹${bid.bidAmount?.toLocaleString() || 'N/A'}</div>
         </div>
+        <div style="background:#f8fafc;padding:12px;border-radius:8px;">
+          <div style="font-size:12px;color:#64748b;font-weight:600;">WORK STATUS</div>
+          <div style="font-size:14px;color:#1e293b;margin-top:2px;">${workflowStatus}</div>
+        </div>
+        <div style="background:#f8fafc;padding:12px;border-radius:8px;">
+          <div style="font-size:12px;color:#64748b;font-weight:600;">GEO VERIFICATION</div>
+          <div style="font-size:14px;color:#1e293b;margin-top:2px;">${proof.distanceFromIssue ? `${proof.distanceFromIssue} meters from issue` : 'N/A'}</div>
+        </div>
       </div>
 
       ${proof.notes ? `<div style="margin-top:16px;padding:12px;background:#fffbeb;border-radius:8px;border:1px solid #fde68a;"><div style="font-size:12px;color:#92400e;font-weight:600;">CONTRACTOR NOTES</div><div style="font-size:14px;color:#78350f;margin-top:4px;">${proof.notes}</div></div>` : ''}
+
+      <div style="margin-top:18px;">
+        <div class="rd-label">Recent Past Ratings</div>
+        ${renderPastRatings(contractor.pastProjects || [])}
+      </div>
 
       ${bid.status === 'completed' || bid.workProof?.adminReview?.status !== 'verified' ? `
         <button onclick="verifyWorkFromView('${bid._id}')" class="btn btn-primary" style="width:100%;margin-top:20px;padding:14px;">Verify Work & Forward to Citizen</button>
@@ -1855,7 +2058,7 @@ window.openCompletionView = async function (issueId) {
 };
 
 window.closeCompletionView = function () {
-  document.getElementById('completionViewModal').style.display = 'none';
+  hideAdminOverlayModal(document.getElementById('completionViewModal'));
 };
 
 window.approvePaymentFromView = async function (bidId) {

@@ -7,6 +7,11 @@ const Issue = require('../models/Issue');
 const upload = require('../middleware/upload');
 const { isWithinRadius, calculateDistance } = require('../utils/locationUtils');
 
+const completeWorkUpload = upload.fields([
+  { name: 'beforeImages', maxCount: 3 },
+  { name: 'afterImages', maxCount: 3 }
+]);
+
 function toStoredFile(file) {
   if (file.path || file.location) {
     return {
@@ -360,15 +365,24 @@ router.post('/bid/:bidId/start-work', authenticateContractor, async (req, res) =
 });
 
 // Submit work completion with before/after images + location verification
-router.post('/bid/:bidId/complete', authenticateContractor, upload.fields([
-  { name: 'beforeImages', maxCount: 3 },
-  { name: 'afterImages', maxCount: 3 }
-]), async (req, res) => {
+router.post('/bid/:bidId/complete', authenticateContractor, (req, res, next) => {
+  completeWorkUpload(req, res, (error) => {
+    if (!error) return next();
+
+    console.error('Complete work upload error:', error);
+    return res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to process uploaded images'
+    });
+  });
+}, async (req, res) => {
   try {
     const { latitude, longitude, notes } = req.body;
+    const parsedLatitude = Number(latitude);
+    const parsedLongitude = Number(longitude);
 
     // Location is REQUIRED for completion
-    if (!latitude || !longitude) {
+    if (!Number.isFinite(parsedLatitude) || !Number.isFinite(parsedLongitude)) {
       return res.status(400).json({
         success: false,
         message: 'Current location (latitude, longitude) is required to submit completion'
@@ -389,9 +403,24 @@ router.post('/bid/:bidId/complete', authenticateContractor, upload.fields([
     }
 
     // Validate 500m radius from issue location using Haversine
-    const contractorCoords = [parseFloat(longitude), parseFloat(latitude)];
-    const issueCoords = bid.issue.location.coordinates;
+    const contractorCoords = [parsedLongitude, parsedLatitude];
+    const issueCoords = bid.issue?.location?.coordinates;
+
+    if (!Array.isArray(issueCoords) || issueCoords.length !== 2) {
+      return res.status(400).json({
+        success: false,
+        message: 'Issue location is missing. Please contact admin before submitting completion.'
+      });
+    }
+
     const distance = calculateDistance(contractorCoords, issueCoords);
+
+    if (!Number.isFinite(distance)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Unable to verify your location for this issue'
+      });
+    }
 
     if (distance > 500) {
       return res.status(400).json({
@@ -447,6 +476,19 @@ router.post('/bid/:bidId/complete', authenticateContractor, upload.fields([
     });
 
     // Update contractor statistics
+    if (!req.contractor.statistics) {
+      req.contractor.statistics = {
+        totalBids: 0,
+        acceptedBids: 0,
+        completedProjects: 0,
+        averageRating: 0,
+        averageQualityRating: 0,
+        averageTimeRating: 0,
+        averageCostRating: 0,
+        totalRatings: 0,
+        efficiencyScore: 0
+      };
+    }
     req.contractor.statistics.completedProjects += 1;
     await req.contractor.save();
 
