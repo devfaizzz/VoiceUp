@@ -338,7 +338,7 @@ async function refreshIssueDetails(issueId, { trackView = false } = {}) {
   const method = trackView ? 'POST' : 'GET';
   const res = await fetch(endpoint, { method, headers: authHeader() });
   if (!res.ok) throw new Error('Failed to load issue');
-  const data = await res.json();
+  const data = await parseJsonSafe(res);
   return data.issue || data;
 }
 
@@ -582,7 +582,7 @@ async function loadMyReports() {
       else throw new Error('Failed to fetch user issues');
     }
 
-    const data = res.ok ? await res.json() : [];
+    const data = res.ok ? await parseJsonSafe(res) : [];
     window.myIssues = data.issues || data || [];
     renderReportsList(window.myIssues, list, 5);
   } catch (err) {
@@ -606,12 +606,10 @@ async function loadNearbyIssues() {
   navigator.geolocation.getCurrentPosition(async (position) => {
     try {
       const radius = 5000;
-      const res = await fetch(`/api/issues/nearby?latitude=${position.coords.latitude}&longitude=${position.coords.longitude}&radius=${radius}`, {
-        headers: authHeader()
-      });
+      const res = await fetch(`/api/issues/nearby?latitude=${position.coords.latitude}&longitude=${position.coords.longitude}&radius=${radius}`);
 
       if (!res.ok) throw new Error('Failed to fetch nearby issues');
-      const data = await res.json();
+      const data = await parseJsonSafe(res);
       nearbyIssues = data.issues || [];
 
       const radiusLabel = document.getElementById('nearbyRadiusLabel');
@@ -628,6 +626,16 @@ async function loadNearbyIssues() {
     enableHighAccuracy: true,
     timeout: 10000
   });
+}
+
+async function parseJsonSafe(res) {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: text };
+  }
 }
 
 function renderReportsList(issues, containerStrOrEl = 'reportsList', limit = null, options = {}) {
@@ -684,7 +692,7 @@ async function handleDetailUpvote() {
       method: 'POST',
       headers: authHeader()
     });
-    const data = await res.json();
+    const data = await parseJsonSafe(res);
     if (!res.ok) throw new Error(data.message || 'Failed to upvote');
     currentReport = data.issue || currentReport;
     document.getElementById('mdLikes').textContent = currentReport.upvoteCount || currentReport.upvotes?.length || 0;
@@ -711,7 +719,7 @@ async function submitCitizenVerification(decision) {
       headers: { 'Content-Type': 'application/json', ...authHeader() },
       body: JSON.stringify({ decision })
     });
-    const data = await res.json();
+    const data = await parseJsonSafe(res);
     if (!res.ok) throw new Error(data.message || 'Failed to submit response');
     currentReport = data.issue || currentReport;
     showToast(
@@ -948,7 +956,7 @@ document.addEventListener('DOMContentLoaded', () => {
           });
 
           if (res.ok) {
-            const data = await res.json();
+    const data = await parseJsonSafe(res);
             const transcript = (data.text || '').trim();
             if (transcript) {
               // Auto-fill description initially
@@ -1057,7 +1065,7 @@ document.addEventListener('DOMContentLoaded', () => {
         headers: { 'Content-Type': 'application/json', ...authHeader() },
         body: JSON.stringify(body)
       });
-      const json = await res.json();
+      const json = await parseJsonSafe(res);
       if (res.ok) {
         // Track anonymously submitted issues locally
         if (json.id) {
@@ -1070,6 +1078,10 @@ document.addEventListener('DOMContentLoaded', () => {
           } catch (e) { }
         }
         showToast(`✅ Report submitted! AI Priority: ${json.priority || 'medium'}`, 'success');
+
+        if (typeof json.coinsAwarded === 'number' && getToken()) {
+          updateCoinsDisplay((userCoins || 0) + json.coinsAwarded);
+        }
 
         // Show AI reason alert if available
         if (json.aiReason) {

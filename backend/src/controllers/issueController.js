@@ -17,6 +17,22 @@ const COIN_REWARDS = {
   satisfied: 75
 };
 
+function fallbackAiClassification(title, description) {
+  const text = `${title || ''} ${description || ''}`.toLowerCase();
+  let severity = 3;
+
+  if (/(danger|urgent|collapsed|flood|fire|accident|injury)/.test(text)) severity = 9;
+  else if (/(broken|blocked|overflow|burst|sewage|pothole|leak)/.test(text)) severity = 6;
+
+  const priority = severity >= 9 ? 'critical' : severity >= 6 ? 'high' : severity >= 4 ? 'medium' : 'low';
+  return {
+    priority,
+    severity,
+    duplicateCount: 0,
+    aiReason: 'Fallback local classification'
+  };
+}
+
 function getUserId(req) {
   return req.user?._id || req.user?.id || null;
 }
@@ -99,23 +115,16 @@ const getNearbyIssues = async (req, res) => {
     const radius = Math.min(Math.max(Number(req.query.radius) || 5000, 100), 20000);
     const currentUserId = getUserId(req);
 
-    const issues = await Issue.find({
+    const candidates = await Issue.find({
       isPublic: true,
-      location: {
-        $near: {
-          $geometry: {
-            type: 'Point',
-            coordinates: [coords.lng, coords.lat]
-          },
-          $maxDistance: radius
-        }
-      }
+      'location.coordinates.0': { $exists: true },
+      'location.coordinates.1': { $exists: true }
     })
-      .sort({ priority: -1, upvoteCount: -1, createdAt: -1 })
-      .limit(50)
+      .sort({ createdAt: -1 })
+      .limit(200)
       .lean();
 
-    const enriched = issues.map((issue) => {
+    const enriched = candidates.map((issue) => {
       const distance = issue.location?.coordinates
         ? Math.round(calculateDistance([coords.lng, coords.lat], issue.location.coordinates))
         : null;
@@ -123,7 +132,13 @@ const getNearbyIssues = async (req, res) => {
         ...sanitizeIssue(issue, currentUserId),
         distance
       };
-    });
+    })
+      .filter((issue) => issue.distance !== null && issue.distance <= radius)
+      .sort((a, b) => {
+        if ((b.upvoteCount || 0) !== (a.upvoteCount || 0)) return (b.upvoteCount || 0) - (a.upvoteCount || 0);
+        return (a.distance || 0) - (b.distance || 0);
+      })
+      .slice(0, 50);
 
     return res.status(200).json({ issues: enriched, radius });
   } catch (error) {
@@ -158,17 +173,22 @@ const createIssue = async (req, res) => {
       imageBuffer = Buffer.from(base64Data, 'base64');
     }
 
-    const [ai, sentiment] = await Promise.all([
-      classifier.classify(
+    let ai;
+    try {
+      ai = await classifier.classify(
         imageBuffer,
         title,
         description,
         category,
         coords.lng,
         coords.lat
-      ),
-      Promise.resolve(sentimentService.analyzeText(description))
-    ]);
+      );
+    } catch (classificationError) {
+      console.error('AI classification failed, using fallback:', classificationError);
+      ai = fallbackAiClassification(title, description);
+    }
+
+    const sentiment = sentimentService.analyzeText(description);
 
     const basePriority = normalizePriority(ai.priority);
     const issue = await Issue.create({
@@ -227,7 +247,7 @@ const createIssue = async (req, res) => {
       severity: ai.severity,
       duplicateCount: ai.duplicateCount,
       aiReason: ai.aiReason,
-      coinsAwarded: COIN_REWARDS.new,
+      coinsAwarded: userId ? COIN_REWARDS.new : 0,
       sentiment: issue.sentiment
     });
   } catch (error) {

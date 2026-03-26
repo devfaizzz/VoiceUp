@@ -7,6 +7,21 @@ const Issue = require('../models/Issue');
 const upload = require('../middleware/upload');
 const { isWithinRadius, calculateDistance } = require('../utils/locationUtils');
 
+function toStoredFile(file) {
+  if (file.path || file.location) {
+    return {
+      url: file.path || file.location,
+      publicId: file.filename || file.key
+    };
+  }
+
+  const base64 = file.buffer ? `data:${file.mimetype};base64,${file.buffer.toString('base64')}` : '';
+  return {
+    url: base64,
+    publicId: file.originalname || `${Date.now()}-upload`
+  };
+}
+
 // Middleware to authenticate contractor
 const authenticateContractor = async (req, res, next) => {
   try {
@@ -388,15 +403,9 @@ router.post('/bid/:bidId/complete', authenticateContractor, upload.fields([
     }
 
     // Process uploaded images
-    const beforeImages = (req.files?.beforeImages || []).map(file => ({
-      url: file.path || file.location,
-      publicId: file.filename || file.key
-    }));
+    const beforeImages = (req.files?.beforeImages || []).map(toStoredFile);
 
-    const afterImages = (req.files?.afterImages || []).map(file => ({
-      url: file.path || file.location,
-      publicId: file.filename || file.key
-    }));
+    const afterImages = (req.files?.afterImages || []).map(toStoredFile);
 
     if (beforeImages.length === 0) {
       return res.status(400).json({
@@ -465,7 +474,7 @@ router.post('/bid/:bidId/complete', authenticateContractor, upload.fields([
     console.error('Complete work error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error completing work',
+      message: error.message || 'Error completing work',
       error: error.message
     });
   }

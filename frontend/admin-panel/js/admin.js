@@ -14,6 +14,47 @@ function clearAdminAuth() {
   localStorage.removeItem('voiceup_admin_token');
 }
 
+async function refreshAdminToken() {
+  const refreshToken = localStorage.getItem('voiceup_admin_refresh');
+  if (!refreshToken) return null;
+
+  try {
+    const res = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken })
+    });
+    const data = await res.json();
+    if (res.ok && data.token) {
+      localStorage.setItem('voiceup_admin_token', data.token);
+      return data.token;
+    }
+  } catch (e) {
+    console.error('Admin token refresh failed:', e);
+  }
+
+  return null;
+}
+
+async function adminFetch(url, options = {}) {
+  const headers = {
+    ...options.headers,
+    ...adminAuthHeader()
+  };
+
+  let res = await fetch(url, { ...options, headers });
+
+  if (res.status === 401 || res.status === 403) {
+    const token = await refreshAdminToken();
+    if (token) {
+      headers.Authorization = 'Bearer ' + token;
+      res = await fetch(url, { ...options, headers });
+    }
+  }
+
+  return res;
+}
+
 // ── Profile Dropdown Toggle ──
 function setupAdminProfileDropdown() {
   const profileBtn = document.getElementById('userProfileBtn');
@@ -192,6 +233,10 @@ function showPage(page, el) {
     setTimeout(initCharts, 100);
   }
 
+  if (page === 'sentiment' && typeof window.loadSentimentData === 'function') {
+    window.loadSentimentData();
+  }
+
   // Render issues page table
   if (page === 'issues') {
     renderIssuesPage();
@@ -306,7 +351,7 @@ function initAdminMap() {
 
 async function loadIssuesOnMap() {
   try {
-    const res = await fetch('/api/issues/public', { headers: adminAuthHeader() });
+    const res = await adminFetch('/api/issues/public');
     const data = await res.json();
     const issues = data.issues || [];
 
@@ -997,7 +1042,7 @@ document.addEventListener('DOMContentLoaded', () => {
     scoreEl.textContent = '...';
 
     try {
-      const res = await fetch('/api/sentiment/dashboard', { headers: adminAuthHeader() });
+      const res = await adminFetch('/api/sentiment/dashboard');
       if (!res.ok) throw new Error('Failed to load');
       const data = await res.json();
 
@@ -1076,7 +1121,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Feature 6: Load Trust Dashboard Data ──
   async function loadTrustData() {
     try {
-      const res = await fetch('/api/analytics/trust-dashboard', { headers: adminAuthHeader() });
+      const res = await adminFetch('/api/analytics/trust-dashboard');
       if (!res.ok) throw new Error('Failed to load trust data');
       const data = await res.json();
 
@@ -1107,6 +1152,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   window.loadAll = loadAll;
+  window.loadSentimentData = loadSentimentData;
+  window.loadTrustData = loadTrustData;
 
   // ── Render pending issues (Dashboard: new + hold) ──
   function renderPending() {
@@ -1541,11 +1588,12 @@ window.openReportDetail = async function (issueId) {
   body.innerHTML = '<div style="text-align:center;padding:40px;color:#64748b;">Loading report...</div>';
 
   try {
-    const res = await fetch(`/api/admin/issue/${issueId}/details`, { headers: adminAuthHeader() });
+    const res = await adminFetch(`/api/admin/issue/${issueId}/details`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.message);
 
     const issue = data.issue;
+    const acceptedBid = data.acceptedBidDetails;
     title.textContent = `Report: ${issue.title || 'Untitled'}`;
 
     const coords = issue.location?.coordinates || [];
@@ -1562,6 +1610,18 @@ window.openReportDetail = async function (issueId) {
       imagesHTML = `<div class="rd-images">${issue.images.map(img =>
         `<img src="${img.url}" alt="Report image" onerror="this.style.display='none'">`
       ).join('')}</div>`;
+    }
+
+    let contractorHTML = '<div class="rd-value">No contractor assigned yet.</div>';
+    if (acceptedBid?.contractor) {
+      contractorHTML = `
+        <div class="rd-value">
+          <strong>${acceptedBid.contractor.name || 'Contractor'}</strong><br>
+          ${acceptedBid.contractor.email || ''}<br>
+          ${acceptedBid.contractor.phone || ''}<br>
+          Avg Rating: ${(acceptedBid.contractor.statistics?.averageRating || 0).toFixed(1)}
+        </div>
+      `;
     }
 
     // Build action buttons based on contractor assignment status
@@ -1603,6 +1663,7 @@ window.openReportDetail = async function (issueId) {
       </div>
       <div class="rd-field"><div class="rd-label">Location</div><div class="rd-value">📍 ${issue.location?.address || `Lat: ${lat}, Lng: ${lng}`}</div></div>
       <div class="rd-field"><div class="rd-label">Images</div>${imagesHTML}</div>
+      <div class="rd-field"><div class="rd-label">Assigned Contractor</div>${contractorHTML}</div>
       ${actionHTML}
     `;
   } catch (err) {
@@ -1699,7 +1760,7 @@ window.openCompletionView = async function (issueId) {
   body.innerHTML = '<div style="text-align:center;padding:40px;color:#64748b;">Loading...</div>';
 
   try {
-    const res = await fetch(`/api/admin/issue/${issueId}/details`, { headers: adminAuthHeader() });
+    const res = await adminFetch(`/api/admin/issue/${issueId}/details`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.message);
 
@@ -1800,7 +1861,7 @@ window.closeCompletionView = function () {
 window.approvePaymentFromView = async function (bidId) {
   if (!confirm('Approve payment for this completed work?')) return;
   try {
-    const res = await fetch(`/api/admin/bid/${bidId}/approve-payment`, {
+    const res = await adminFetch(`/api/admin/bid/${bidId}/approve-payment`, {
       method: 'POST',
       headers: adminAuthHeader()
     });
@@ -1819,7 +1880,7 @@ window.approvePaymentFromView = async function (bidId) {
 
 window.verifyWorkFromView = async function (bidId) {
   try {
-    const res = await fetch(`/api/admin/bid/${bidId}/verify-work`, {
+    const res = await adminFetch(`/api/admin/bid/${bidId}/verify-work`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...adminAuthHeader() },
       body: JSON.stringify({ notes: 'Verified from admin completion view' })
@@ -1841,7 +1902,7 @@ window.submitContractorRating = async function (bidId) {
   const feedback = document.getElementById('rateFeedback')?.value || '';
 
   try {
-    const res = await fetch(`/api/admin/bid/${bidId}/rate`, {
+    const res = await adminFetch(`/api/admin/bid/${bidId}/rate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...adminAuthHeader() },
       body: JSON.stringify({ quality, timeliness, cost, feedback })

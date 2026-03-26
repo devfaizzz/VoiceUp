@@ -40,3 +40,49 @@ function logout() {
     clearAuth();
     window.location.href = '/login.html';
 }
+
+async function refreshAuthToken() {
+    const refreshToken = localStorage.getItem('voiceup_refresh');
+    if (!refreshToken) {
+        clearAuth();
+        return null;
+    }
+
+    try {
+        const response = await fetch('/api/auth/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refreshToken })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.token) {
+            localStorage.setItem('voiceup_token', data.token);
+            return data.token;
+        }
+    } catch (error) {
+        console.error('Citizen token refresh failed:', error);
+    }
+
+    clearAuth();
+    return null;
+}
+
+async function authFetch(url, options = {}) {
+    const headers = {
+        ...options.headers,
+        ...authHeader()
+    };
+
+    let response = await fetch(url, { ...options, headers });
+
+    if (response.status === 401 || response.status === 403) {
+        const newToken = await refreshAuthToken();
+        if (newToken) {
+            headers.Authorization = 'Bearer ' + newToken;
+            response = await fetch(url, { ...options, headers });
+        }
+    }
+
+    return response;
+}

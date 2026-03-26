@@ -7,6 +7,11 @@ const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
 // Choose provider via env: 's3' or 'cloudinary'
 const provider = process.env.UPLOAD_PROVIDER || 'cloudinary';
+const hasCloudinaryConfig = !!(
+  process.env.CLOUDINARY_CLOUD_NAME &&
+  process.env.CLOUDINARY_API_KEY &&
+  process.env.CLOUDINARY_API_SECRET
+);
 
 let upload;
 
@@ -40,7 +45,7 @@ if (provider === 's3') {
       else cb(new Error('Only image and audio files are allowed'));
     }
   });
-} else {
+} else if (hasCloudinaryConfig) {
   // Cloudinary configuration
   cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -62,6 +67,18 @@ if (provider === 's3') {
     }
   });
 
+  upload = multer({
+    storage,
+    limits: { fileSize: 20 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+      const isImage = file.mimetype.startsWith('image/');
+      const isAudio = file.mimetype.startsWith('audio/');
+      if (isImage || isAudio) cb(null, true);
+      else cb(new Error('Only image and audio files are allowed'));
+    }
+  });
+} else {
+  const storage = multer.memoryStorage();
   upload = multer({
     storage,
     limits: { fileSize: 20 * 1024 * 1024 },

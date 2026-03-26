@@ -113,7 +113,7 @@ function showPage(page, el) {
 async function loadDashboardStats() {
     try {
         const response = await contractorFetch('/api/contractor/dashboard-stats');
-        const data = await response.json();
+        const data = await parseResponseSafe(response);
 
         if (data.success) {
             document.getElementById('statTotalBids').textContent = data.stats.totalBids || 0;
@@ -188,7 +188,7 @@ async function loadAvailableIssues() {
 
     try {
         const response = await contractorFetch('/api/contractor/available-issues');
-        const data = await response.json();
+        const data = await parseResponseSafe(response);
 
         if (data.success && data.issues.length > 0) {
             grid.innerHTML = data.issues.map(issue => `
@@ -233,7 +233,7 @@ async function loadMyBids() {
 
     try {
         const response = await contractorFetch(`/api/contractor/my-bids?status=${status}`);
-        const data = await response.json();
+        const data = await parseResponseSafe(response);
 
         if (data.success && data.bids.length > 0) {
             tbody.innerHTML = data.bids.map(bid => `
@@ -267,7 +267,7 @@ async function loadActiveProjects() {
 
     try {
         const response = await contractorFetch('/api/contractor/accepted-bids');
-        const data = await response.json();
+        const data = await parseResponseSafe(response);
 
         const activeProjects = data.bids?.filter(b => ['accepted', 'work_in_progress'].includes(b.status)) || [];
 
@@ -312,7 +312,7 @@ async function loadCompletedProjects() {
 
     try {
         const response = await contractorFetch('/api/contractor/accepted-bids');
-        const data = await response.json();
+        const data = await parseResponseSafe(response);
 
         const completedProjects = data.bids?.filter(b => ['completed', 'payment_requested', 'paid'].includes(b.status)) || [];
 
@@ -376,7 +376,7 @@ async function loadIssueDetails(issueId) {
     const container = document.getElementById('bidIssueDetails');
     try {
         const response = await fetch(`/api/issues/public/${issueId}`);
-        const data = await response.json();
+        const data = await parseResponseSafe(response);
         
         if (data) {
             container.innerHTML = `
@@ -721,7 +721,8 @@ function getCurrentPosition() {
         
         navigator.geolocation.getCurrentPosition(resolve, reject, {
             enableHighAccuracy: true,
-            timeout: 10000
+            timeout: 30000,
+            maximumAge: 10000
         });
     });
 }
@@ -763,4 +764,14 @@ function showToast(message, type = 'info') {
         toast.style.animation = 'slideUp 0.3s ease reverse';
         setTimeout(() => toast.remove(), 300);
     }, 4000);
+}
+
+async function parseResponseSafe(response) {
+    const text = await response.text();
+    if (!text) return {};
+    try {
+        return JSON.parse(text);
+    } catch {
+        return { message: text };
+    }
 }
