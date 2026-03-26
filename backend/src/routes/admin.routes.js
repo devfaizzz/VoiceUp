@@ -20,7 +20,7 @@ router.get('/issue/:id/details', async (req, res) => {
   try {
     const issue = await Issue.findById(req.params.id)
       .populate('reportedBy', 'name email phone')
-      .populate('contractorAssignment.acceptedContractor', 'name email phone statistics')
+      .populate('contractorAssignment.acceptedContractor', 'name email phone aadhaarNumber statistics')
       .populate('contractorAssignment.acceptedBid');
 
     if (!issue) {
@@ -35,20 +35,37 @@ router.get('/issue/:id/details', async (req, res) => {
     const acceptedBidId = issue.contractorAssignment?.acceptedBid;
     if (acceptedBidId) {
       acceptedBidDetails = await Bid.findById(acceptedBidId)
-        .populate('contractor', 'name email phone statistics location profilePicture');
+        .populate('contractor', 'name email phone aadhaarNumber statistics location profilePicture address isVerified');
     }
 
     if (!acceptedBidDetails) {
       acceptedBidDetails = await Bid.findOne({ issue: req.params.id })
         .sort({ updatedAt: -1, createdAt: -1 })
-        .populate('contractor', 'name email phone statistics location profilePicture');
+        .populate('contractor', 'name email phone aadhaarNumber statistics location profilePicture address isVerified');
+    }
+
+    let acceptedBidPayload = acceptedBidDetails ? acceptedBidDetails.toObject() : null;
+
+    if (acceptedBidPayload?.contractor?._id) {
+      const contractorDetails = await Contractor.findById(acceptedBidPayload.contractor._id)
+        .select('name email phone aadhaarNumber statistics location profilePicture address isVerified pastProjects')
+        .populate('pastProjects.issueId', 'title category')
+        .lean();
+
+      if (contractorDetails) {
+        contractorDetails.pastProjects = (contractorDetails.pastProjects || [])
+          .sort((a, b) => new Date(b.completedAt || 0) - new Date(a.completedAt || 0))
+          .slice(0, 5);
+
+        acceptedBidPayload.contractor = contractorDetails;
+      }
     }
 
     res.json({
       success: true,
       issue: issue.toObject(),
       bidCount,
-      acceptedBidDetails
+      acceptedBidDetails: acceptedBidPayload
     });
   } catch (error) {
     console.error('Get issue details error:', error);

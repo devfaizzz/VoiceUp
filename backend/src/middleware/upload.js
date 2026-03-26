@@ -6,12 +6,30 @@ const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
 // Choose provider via env: 's3' or 'cloudinary'
-const provider = process.env.UPLOAD_PROVIDER || 'cloudinary';
-const hasCloudinaryConfig = !!(
-  process.env.CLOUDINARY_CLOUD_NAME &&
-  process.env.CLOUDINARY_API_KEY &&
+const provider = (process.env.UPLOAD_PROVIDER || 'cloudinary').toLowerCase().trim();
+
+function isUsableConfigValue(value) {
+  if (!value) return false;
+
+  const normalized = String(value).trim().toLowerCase();
+  return ![
+    '',
+    'disabled',
+    'false',
+    'null',
+    'none',
+    'undefined',
+    'your-cloud-name',
+    'your-api-key',
+    'your-api-secret'
+  ].includes(normalized);
+}
+
+const hasCloudinaryConfig = [
+  process.env.CLOUDINARY_CLOUD_NAME,
+  process.env.CLOUDINARY_API_KEY,
   process.env.CLOUDINARY_API_SECRET
-);
+].every(isUsableConfigValue);
 
 let upload;
 

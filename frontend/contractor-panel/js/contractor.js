@@ -181,6 +181,29 @@ function getStatusTag(issue) {
     return '<span class="status-tag pending">Open for Bids</span>';
 }
 
+function isPendingAdminVerification(bid) {
+    return bid?.status === 'completed'
+        && bid?.workProof?.afterImages?.length > 0
+        && bid?.workProof?.adminReview?.status !== 'verified'
+        && !['payment_pending', 'paid'].includes(bid?.issue?.contractorAssignment?.status);
+}
+
+function getProjectPhaseLabel(bid) {
+    if (isPendingAdminVerification(bid)) return 'Pending Admin Verification';
+    if (bid?.issue?.contractorAssignment?.status === 'payment_pending') return 'Admin Verified';
+    if (bid?.status === 'payment_requested') return 'Payment Requested';
+    if (bid?.status === 'paid' || bid?.issue?.contractorAssignment?.status === 'paid') return 'Paid';
+    if (bid?.status === 'work_in_progress') return 'Work In Progress';
+    if (bid?.status === 'accepted') return 'Accepted';
+    return bid?.status || 'Unknown';
+}
+
+function isArchivedCompletedProject(bid) {
+    return ['payment_requested', 'paid'].includes(bid?.status)
+        || ['payment_pending', 'paid'].includes(bid?.issue?.contractorAssignment?.status)
+        || (bid?.status === 'completed' && bid?.workProof?.adminReview?.status === 'verified');
+}
+
 // Available issues
 async function loadAvailableIssues() {
     const grid = document.getElementById('availableIssuesGrid');
@@ -269,7 +292,7 @@ async function loadActiveProjects() {
         const response = await contractorFetch('/api/contractor/accepted-bids');
         const data = await parseResponseSafe(response);
 
-        const activeProjects = data.bids?.filter(b => ['accepted', 'work_in_progress'].includes(b.status)) || [];
+        const activeProjects = data.bids?.filter(b => ['accepted', 'work_in_progress'].includes(b.status) || isPendingAdminVerification(b)) || [];
 
         if (activeProjects.length > 0) {
             container.innerHTML = activeProjects.map(bid => `
@@ -284,12 +307,18 @@ async function loadActiveProjects() {
                                     <span>📅 ${bid.completionDays} days</span>
                                     <span>⏰ Deadline: ${new Date(bid.completionDeadline).toLocaleDateString()}</span>
                                 </div>
+                                ${isPendingAdminVerification(bid) ? `
+                                    <div style="margin-top:10px;padding:10px 12px;border-radius:10px;background:#eff6ff;color:#1d4ed8;font-size:13px;font-weight:600;">
+                                        Work submitted. Waiting for admin verification.
+                                    </div>
+                                ` : ''}
                             </div>
                             <div style="text-align:right;">
-                                <span class="bid-status bid-${bid.status}">${bid.status}</span>
+                                <span class="bid-status bid-${bid.status}">${getProjectPhaseLabel(bid)}</span>
                                 <div style="margin-top:12px;">
                                     ${bid.status === 'accepted' ? `<button class="btn btn-primary btn-sm" onclick="startWork('${bid._id}')">🔧 Start Work</button>` : ''}
                                     ${bid.status === 'work_in_progress' ? `<button class="btn btn-success btn-sm" onclick="openWorkModal('${bid._id}')">✓ Mark Complete</button>` : ''}
+                                    ${isPendingAdminVerification(bid) ? `<span style="display:inline-block;color:#64748b;font-size:13px;font-weight:600;">Admin review pending</span>` : ''}
                                 </div>
                             </div>
                         </div>
@@ -314,7 +343,7 @@ async function loadCompletedProjects() {
         const response = await contractorFetch('/api/contractor/accepted-bids');
         const data = await parseResponseSafe(response);
 
-        const completedProjects = data.bids?.filter(b => ['completed', 'payment_requested', 'paid'].includes(b.status)) || [];
+        const completedProjects = data.bids?.filter(isArchivedCompletedProject) || [];
 
         if (completedProjects.length > 0) {
             tbody.innerHTML = completedProjects.map(bid => `
@@ -325,9 +354,12 @@ async function loadCompletedProjects() {
                     <td>${bid.workProof?.submittedAt ? new Date(bid.workProof.submittedAt).toLocaleDateString() : 'N/A'}</td>
                     <td>
                         <span class="bid-status bid-${bid.status}">
-                            ${bid.status === 'completed' ? 'Pending Payment' : bid.status}
+                            ${getProjectPhaseLabel(bid)}
                         </span>
-                        ${bid.status === 'completed' ? `<button class="btn btn-primary btn-sm" style="margin-left:8px;" onclick="openPaymentModal('${bid._id}')">Request</button>` : ''}
+                        ${bid.issue?.contractorAssignment?.status === 'payment_pending' || bid.status === 'completed'
+                            ? `<button class="btn btn-primary btn-sm" style="margin-left:8px;" onclick="openPaymentModal('${bid._id}')">Request</button>`
+                            : ''
+                        }
                     </td>
                     <td>${bid.rating?.score ? `⭐ ${bid.rating.score}/5` : 'Not rated'}</td>
                 </tr>
@@ -637,11 +669,12 @@ document.getElementById('workForm').addEventListener('submit', async (e) => {
             body: formData
         });
 
-        const data = await response.json();
+        const data = await parseResponseSafe(response);
 
         if (data.success) {
-            showToast('Work completed successfully!', 'success');
+            showToast('Work submitted. Pending admin verification.', 'success');
             closeWorkModal();
+            loadDashboardStats();
             loadActiveProjects();
             loadCompletedProjects();
         } else {
