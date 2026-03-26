@@ -1,5 +1,5 @@
 🚀 VoiceUp – AI-Powered Civic Intelligence & Leadership Support System
-
+ 
 VoiceUp is an AI-driven civic issue and decision-support platform designed to empower **local leaders, municipal authorities, and citizens** by transforming unstructured public grievances into actionable insights.
 
 It helps bridge the gap between citizens and governance by enabling **structured issue reporting, intelligent prioritization, transparent execution, and data-driven decision-making**.
