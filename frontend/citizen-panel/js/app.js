@@ -136,6 +136,70 @@ function issueCoords(issue) {
   return null;
 }
 
+function ensureCitizenVerificationProofContainer() {
+  const card = document.getElementById('citizenVerificationCard');
+  if (!card) return null;
+
+  let proof = document.getElementById('citizenVerificationProof');
+  if (proof) return proof;
+
+  proof = document.createElement('div');
+  proof.id = 'citizenVerificationProof';
+  proof.className = 'verification-proof';
+  proof.style.display = 'none';
+
+  const actions = card.querySelector('.verification-actions');
+  if (actions) card.insertBefore(proof, actions);
+  else card.appendChild(proof);
+
+  return proof;
+}
+
+function renderVerificationThumbs(images, emptyLabel, accentClass = '') {
+  if (!images || images.length === 0) {
+    return `<div class="verification-proof-empty ${accentClass}">${emptyLabel}</div>`;
+  }
+
+  return `
+    <div class="verification-proof-strip">
+      ${images.map(img => `<img src="${img.url}" alt="Verification image" class="verification-proof-thumb ${accentClass}" onerror="this.style.display='none'">`).join('')}
+    </div>
+  `;
+}
+
+function renderCitizenVerificationProof(issue) {
+  const verification = issue.workVerification;
+  if (!verification?.afterImages?.length) return '';
+
+  const beforeImages = verification.beforeImages?.length
+    ? verification.beforeImages
+    : (issue.images || []).slice(0, 1);
+
+  return `
+    <div class="verification-proof-grid">
+      <div class="verification-proof-group">
+        <div class="verification-proof-label">Before</div>
+        ${renderVerificationThumbs(beforeImages, 'No before image available')}
+      </div>
+      <div class="verification-proof-group after">
+        <div class="verification-proof-label success">After</div>
+        ${renderVerificationThumbs(verification.afterImages, 'No after image available', 'success')}
+      </div>
+    </div>
+    ${verification.notes || verification.adminNotes ? `
+      <div class="verification-proof-note">
+        ${verification.notes ? `<div><strong>Contractor note:</strong> ${verification.notes}</div>` : ''}
+        ${verification.adminNotes ? `<div><strong>Admin note:</strong> ${verification.adminNotes}</div>` : ''}
+      </div>
+    ` : ''}
+    <div class="verification-proof-meta">
+      ${verification.contractorName ? `<span>Contractor: ${verification.contractorName}</span>` : ''}
+      ${verification.submittedAt ? `<span>Submitted: ${fmtDate(verification.submittedAt)}</span>` : ''}
+      ${verification.verifiedAt ? `<span>Verified: ${fmtDate(verification.verifiedAt)}</span>` : ''}
+    </div>
+  `;
+}
+
 // ─── Badge ──────────────────────────────────────────────────────
 function getBadge(n) {
   if (n >= 100) return { label: 'GOD', emoji: '⚡', color: '#F59E0B' };
@@ -427,13 +491,26 @@ async function openDetailModal(issue) {
 
   const citizenVerificationCard = document.getElementById('citizenVerificationCard');
   const citizenVerificationText = document.getElementById('citizenVerificationText');
+  const citizenVerificationProof = ensureCitizenVerificationProofContainer();
   const currentUserId = currentUserData?.user?._id || getUser()?.id;
   const isReporter = issue.reportedBy && String(issue.reportedBy) === String(currentUserId);
   const canRespond = isReporter && issue.citizenFeedback && issue.citizenFeedback.status === 'pending';
   if (citizenVerificationCard) {
     citizenVerificationCard.style.display = canRespond ? 'flex' : 'none';
+    citizenVerificationCard.classList.toggle('has-proof', canRespond && !!issue.workVerification?.afterImages?.length);
     if (citizenVerificationText && canRespond) {
-      citizenVerificationText.textContent = 'Admin verified the submitted work. Please confirm if you are satisfied.';
+      citizenVerificationText.textContent = issue.workVerification?.contractorName
+        ? `Admin verified ${issue.workVerification.contractorName}'s submitted work. Please review the photos and confirm if you are satisfied.`
+        : 'Admin verified the submitted work. Please review the photos and confirm if you are satisfied.';
+    }
+  }
+  if (citizenVerificationProof) {
+    if (canRespond && issue.workVerification?.afterImages?.length) {
+      citizenVerificationProof.innerHTML = renderCitizenVerificationProof(issue);
+      citizenVerificationProof.style.display = 'block';
+    } else {
+      citizenVerificationProof.innerHTML = '';
+      citizenVerificationProof.style.display = 'none';
     }
   }
 

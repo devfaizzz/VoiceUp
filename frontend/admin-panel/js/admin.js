@@ -224,8 +224,15 @@ function showPage(page, el) {
   if (subtitleEl) subtitleEl.textContent = info.subtitle || '';
 
   // Trigger map resize if switching to map view
-  if (page === 'map-view' && typeof google !== 'undefined' && adminMap) {
-    setTimeout(() => google.maps.event.trigger(adminMap, 'resize'), 200);
+  if (page === 'map-view') {
+    if (!adminMap && typeof google !== 'undefined' && typeof initAdminMap === 'function') {
+      initAdminMap();
+    } else if (typeof google !== 'undefined' && adminMap) {
+      setTimeout(() => {
+        google.maps.event.trigger(adminMap, 'resize');
+        if (typeof loadIssuesOnMap === 'function') loadIssuesOnMap();
+      }, 200);
+    }
   }
 
   // Re-draw charts on analytics page
@@ -334,6 +341,12 @@ function exportCSV() {
 
 // ── Google Maps ──
 function initAdminMap() {
+  if (typeof google === 'undefined' || !document.getElementById('adminMap')) return;
+  if (adminMap) {
+    loadIssuesOnMap();
+    return;
+  }
+
   const defaultLocation = { lat: 28.6139, lng: 77.2090 };
 
   adminMap = new google.maps.Map(document.getElementById('adminMap'), {
@@ -350,6 +363,7 @@ function initAdminMap() {
 }
 
 async function loadIssuesOnMap() {
+  if (!adminMap || typeof google === 'undefined') return;
   try {
     const res = await adminFetch('/api/issues/public');
     const data = await res.json();
@@ -360,7 +374,10 @@ async function loadIssuesOnMap() {
 
     issues.forEach(issue => {
       if (issue.location && issue.location.coordinates) {
-        const [lng, lat] = issue.location.coordinates;
+        const [lngRaw, latRaw] = issue.location.coordinates;
+        const lng = Number(lngRaw);
+        const lat = Number(latRaw);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
         const color = getMarkerColor(issue.priority, issue.status);
 
         const marker = new google.maps.Marker({
@@ -393,6 +410,9 @@ async function loadIssuesOnMap() {
     }
   } catch (e) { console.error('Map error:', e); }
 }
+
+window.initAdminMap = initAdminMap;
+window.loadIssuesOnMap = loadIssuesOnMap;
 
 function getMarkerColor(priority, status) {
   if (['resolved', 'closed', 'approved'].includes(status)) return '#10B981';
@@ -803,6 +823,168 @@ window.submitResolution = async function (issueId) {
   }
 }
 
+function prepareAnalyticsCanvas(canvasId) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+
+  const container = canvas.parentElement;
+  const width = Math.max(container?.clientWidth || canvas.clientWidth || 320, 320);
+  const height = Math.max(container?.clientHeight || canvas.clientHeight || 260, 260);
+  const dpr = window.devicePixelRatio || 1;
+  const ctx = canvas.getContext('2d');
+
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  return { canvas, ctx, width, height };
+}
+
+function drawAnalyticsEmptyState(canvasId, message) {
+  const chart = prepareAnalyticsCanvas(canvasId);
+  if (!chart) return;
+
+  const { ctx, width, height } = chart;
+  ctx.fillStyle = '#94A3B8';
+  ctx.font = '500 14px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(message, width / 2, height / 2);
+}
+
+function drawAnalyticsLineFallback(canvasId, labels, datasets) {
+  const chart = prepareAnalyticsCanvas(canvasId);
+  if (!chart) return;
+
+  const { ctx, width, height } = chart;
+  const margin = { top: 28, right: 18, bottom: 36, left: 42 };
+  const chartWidth = width - margin.left - margin.right;
+  const chartHeight = height - margin.top - margin.bottom;
+  const maxValue = Math.max(1, ...datasets.flatMap(dataset => dataset.data));
+
+  ctx.strokeStyle = 'rgba(148,163,184,0.22)';
+  ctx.lineWidth = 1;
+  for (let step = 0; step <= 4; step += 1) {
+    const y = margin.top + (chartHeight / 4) * step;
+    ctx.beginPath();
+    ctx.moveTo(margin.left, y);
+    ctx.lineTo(width - margin.right, y);
+    ctx.stroke();
+
+    const labelValue = Math.round(maxValue - (maxValue / 4) * step);
+    ctx.fillStyle = '#94A3B8';
+    ctx.font = '11px Inter, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(String(labelValue), margin.left - 8, y + 4);
+  }
+
+  ctx.strokeStyle = 'rgba(99,102,241,0.12)';
+  ctx.beginPath();
+  ctx.moveTo(margin.left, margin.top + chartHeight);
+  ctx.lineTo(width - margin.right, margin.top + chartHeight);
+  ctx.stroke();
+
+  datasets.forEach((dataset) => {
+    ctx.beginPath();
+    ctx.lineWidth = dataset.borderWidth || 2;
+    ctx.strokeStyle = dataset.borderColor;
+    ctx.fillStyle = dataset.pointBackgroundColor || dataset.borderColor;
+
+    dataset.data.forEach((value, index) => {
+      const x = margin.left + (chartWidth / Math.max(labels.length - 1, 1)) * index;
+      const y = margin.top + chartHeight - (value / maxValue) * chartHeight;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    dataset.data.forEach((value, index) => {
+      const x = margin.left + (chartWidth / Math.max(labels.length - 1, 1)) * index;
+      const y = margin.top + chartHeight - (value / maxValue) * chartHeight;
+      ctx.beginPath();
+      ctx.arc(x, y, dataset.pointRadius || 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  });
+
+  labels.forEach((label, index) => {
+    const x = margin.left + (chartWidth / Math.max(labels.length - 1, 1)) * index;
+    ctx.fillStyle = '#64748B';
+    ctx.font = '11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, x, height - 12);
+  });
+
+  let legendX = margin.left;
+  const legendY = 12;
+  datasets.forEach((dataset) => {
+    ctx.fillStyle = dataset.borderColor;
+    ctx.fillRect(legendX, legendY - 7, 10, 10);
+    legendX += 16;
+    ctx.fillStyle = '#334155';
+    ctx.font = '12px Inter, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(dataset.label, legendX, legendY + 1);
+    legendX += ctx.measureText(dataset.label).width + 22;
+  });
+}
+
+function drawAnalyticsDonutFallback(canvasId, labels, values, colors) {
+  const chart = prepareAnalyticsCanvas(canvasId);
+  if (!chart) return;
+
+  const { ctx, width, height } = chart;
+  const total = values.reduce((sum, value) => sum + value, 0);
+  if (!total) {
+    drawAnalyticsEmptyState(canvasId, 'No category data available yet.');
+    return;
+  }
+
+  const centerX = width * 0.32;
+  const centerY = height * 0.5;
+  const radius = Math.min(width * 0.18, height * 0.28);
+  const innerRadius = radius * 0.58;
+  let startAngle = -Math.PI / 2;
+
+  values.forEach((value, index) => {
+    const sliceAngle = (value / total) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.arc(centerX, centerY, radius, startAngle, startAngle + sliceAngle);
+    ctx.closePath();
+    ctx.fillStyle = colors[index];
+    ctx.fill();
+    startAngle += sliceAngle;
+  });
+
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, innerRadius, 0, Math.PI * 2);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fill();
+
+  ctx.fillStyle = '#1E293B';
+  ctx.font = '700 20px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(String(total), centerX, centerY + 4);
+  ctx.font = '11px Inter, sans-serif';
+  ctx.fillStyle = '#64748B';
+  ctx.fillText('Issues', centerX, centerY + 22);
+
+  let legendY = 44;
+  labels.forEach((label, index) => {
+    ctx.fillStyle = colors[index];
+    ctx.fillRect(width * 0.58, legendY - 8, 12, 12);
+    ctx.fillStyle = '#334155';
+    ctx.font = '12px Inter, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${label} (${values[index]})`, width * 0.58 + 18, legendY + 2);
+    legendY += 24;
+  });
+}
+
 function initCharts() {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const totals = new Array(12).fill(0);
@@ -810,57 +992,79 @@ function initCharts() {
   const rejected = new Array(12).fill(0);
 
   allIssues.forEach(i => {
-    const m = new Date(i.createdAt).getMonth();
-    totals[m]++;
-    if (i.status === 'approved') approved[m]++;
-    if (i.status === 'rejected') rejected[m]++;
+    const created = new Date(i.createdAt);
+    if (Number.isNaN(created.getTime())) return;
+    const m = created.getMonth();
+    totals[m] += 1;
+    if (i.status === 'approved') approved[m] += 1;
+    if (i.status === 'rejected') rejected[m] += 1;
   });
 
-  const trendCtx = document.getElementById('trendChart')?.getContext('2d');
-  if (trendCtx) {
-    if (trendChartInst) trendChartInst.destroy();
-    trendChartInst = new Chart(trendCtx, {
-      type: 'line',
-      data: {
-        labels: months,
-        datasets: [
-          { label: 'Total Issues', data: totals, borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.08)', fill: true, tension: 0.4, borderWidth: 2.5, pointRadius: 3, pointBackgroundColor: '#6366f1' },
-          { label: 'Approved', data: approved, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.06)', fill: true, tension: 0.4, borderWidth: 2, pointRadius: 2, pointBackgroundColor: '#10b981' },
-          { label: 'Rejected', data: rejected, borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.04)', fill: true, tension: 0.4, borderWidth: 2, pointRadius: 2, pointBackgroundColor: '#ef4444' }
-        ]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, padding: 18, font: { family: 'Inter', size: 12 } } } },
-        scales: {
-          y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { font: { family: 'Inter', size: 11 } } },
-          x: { grid: { display: false }, ticks: { font: { family: 'Inter', size: 11 } } }
-        }
-      }
-    });
-  }
+  const trendDatasets = [
+    { label: 'Total Issues', data: totals, borderColor: '#6366f1', borderWidth: 2.5, pointRadius: 3, pointBackgroundColor: '#6366f1' },
+    { label: 'Approved', data: approved, borderColor: '#10b981', borderWidth: 2, pointRadius: 2, pointBackgroundColor: '#10b981' },
+    { label: 'Rejected', data: rejected, borderColor: '#ef4444', borderWidth: 2, pointRadius: 2, pointBackgroundColor: '#ef4444' }
+  ];
 
   const catCounts = {};
-  allIssues.forEach(i => { const c = i.category || 'other'; catCounts[c] = (catCounts[c] || 0) + 1; });
-  const labels = Object.keys(catCounts);
-  const values = Object.values(catCounts);
+  allIssues.forEach(i => {
+    const category = i.category || 'other';
+    catCounts[category] = (catCounts[category] || 0) + 1;
+  });
+  const catLabels = Object.keys(catCounts).map(label => label.charAt(0).toUpperCase() + label.slice(1));
+  const catValues = Object.values(catCounts);
   const colors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#a855f7', '#6b7280'];
 
-  const catCtx = document.getElementById('categoryChart')?.getContext('2d');
-  if (catCtx) {
-    if (catChartInst) catChartInst.destroy();
-    catChartInst = new Chart(catCtx, {
-      type: 'doughnut',
-      data: {
-        labels: labels.map(l => l.charAt(0).toUpperCase() + l.slice(1)),
-        datasets: [{ data: values, backgroundColor: colors.slice(0, labels.length), borderWidth: 0, hoverOffset: 8 }]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false, cutout: '65%',
-        plugins: { legend: { position: 'right', labels: { usePointStyle: true, padding: 14, font: { family: 'Inter', size: 12 } } } }
-      }
-    });
+  if (trendChartInst && typeof trendChartInst.destroy === 'function') trendChartInst.destroy();
+  if (catChartInst && typeof catChartInst.destroy === 'function') catChartInst.destroy();
+  trendChartInst = null;
+  catChartInst = null;
+
+  if (typeof Chart === 'function') {
+    const trendCtx = document.getElementById('trendChart')?.getContext('2d');
+    if (trendCtx) {
+      trendChartInst = new Chart(trendCtx, {
+        type: 'line',
+        data: { labels: months, datasets: trendDatasets.map(dataset => ({ ...dataset, fill: false, tension: 0.4 })) },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, padding: 18, font: { family: 'Inter', size: 12 } } } },
+          scales: {
+            y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { font: { family: 'Inter', size: 11 } } },
+            x: { grid: { display: false }, ticks: { font: { family: 'Inter', size: 11 } } }
+          }
+        }
+      });
+    }
+
+    const catCtx = document.getElementById('categoryChart')?.getContext('2d');
+    if (catCtx) {
+      catChartInst = new Chart(catCtx, {
+        type: 'doughnut',
+        data: {
+          labels: catLabels,
+          datasets: [{ data: catValues, backgroundColor: colors.slice(0, catLabels.length), borderWidth: 0, hoverOffset: 8 }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '65%',
+          plugins: { legend: { position: 'right', labels: { usePointStyle: true, padding: 14, font: { family: 'Inter', size: 12 } } } }
+        }
+      });
+    }
+    return;
   }
+
+  if (allIssues.length === 0) {
+    drawAnalyticsEmptyState('trendChart', 'No issue activity available yet.');
+    drawAnalyticsEmptyState('categoryChart', 'No category data available yet.');
+    return;
+  }
+
+  drawAnalyticsLineFallback('trendChart', months, trendDatasets);
+  drawAnalyticsDonutFallback('categoryChart', catLabels, catValues, colors);
 }
 
 // ── Render Reports Table ──
@@ -1023,6 +1227,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (badge) {
       const newCount = allIssues.filter(i => i.status === 'new').length;
       badge.textContent = newCount || '0';
+    }
+
+    if (document.getElementById('page-analytics')?.classList.contains('active')) {
+      setTimeout(initCharts, 80);
     }
 
     if (typeof loadIssuesOnMap === 'function') loadIssuesOnMap();

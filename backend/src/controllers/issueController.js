@@ -47,6 +47,50 @@ function sanitizeIssue(issue, currentUserId) {
   return normalized;
 }
 
+async function attachVerificationProof(issue) {
+  if (!issue) return issue;
+
+  const normalized = typeof issue.toObject === 'function' ? issue.toObject() : { ...issue };
+  const feedbackStatus = normalized.citizenFeedback?.status;
+  const assignmentStatus = normalized.contractorAssignment?.status;
+  const shouldIncludeProof =
+    ['pending', 'satisfied', 'not_satisfied'].includes(feedbackStatus) ||
+    ['completed', 'payment_pending', 'paid'].includes(assignmentStatus);
+
+  if (!shouldIncludeProof) return normalized;
+
+  const acceptedBidId = normalized.contractorAssignment?.acceptedBid;
+  const bidQuery = acceptedBidId
+    ? Bid.findById(acceptedBidId)
+    : Bid.findOne({ issue: normalized._id, 'workProof.afterImages.0': { $exists: true } })
+        .sort({ updatedAt: -1, createdAt: -1 });
+
+  const bid = await bidQuery
+    .select('workProof contractor')
+    .populate('contractor', 'name')
+    .lean();
+
+  if (!bid?.workProof?.afterImages?.length) return normalized;
+
+  const reviewStatus = bid.workProof?.adminReview?.status || 'pending';
+  if (feedbackStatus === 'pending' && reviewStatus !== 'verified') {
+    return normalized;
+  }
+
+  normalized.workVerification = {
+    contractorName: bid.contractor?.name || '',
+    beforeImages: bid.workProof.beforeImages || [],
+    afterImages: bid.workProof.afterImages || [],
+    notes: bid.workProof.notes || '',
+    submittedAt: bid.workProof.submittedAt || null,
+    verifiedAt: bid.workProof.adminReview?.verifiedAt || null,
+    adminNotes: bid.workProof.adminReview?.notes || '',
+    status: reviewStatus
+  };
+
+  return normalized;
+}
+
 async function awardCoins(userId, issue, newStatus) {
   if (!userId) return;
   const reward = COIN_REWARDS[newStatus];
@@ -301,7 +345,8 @@ const getIssueById = async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    return res.status(200).json({ issue: sanitizeIssue(issue, userId) });
+    const issuePayload = await attachVerificationProof(sanitizeIssue(issue, userId));
+    return res.status(200).json({ issue: issuePayload });
   } catch (error) {
     return res.status(404).json({ message: 'Issue not found' });
   }
@@ -375,8 +420,9 @@ const incrementViewCount = async (req, res) => {
     );
 
     if (!issue) return res.status(404).json({ message: 'Issue not found' });
+    const issuePayload = await attachVerificationProof(sanitizeIssue(issue, getUserId(req)));
     return res.status(200).json({
-      issue: sanitizeIssue(issue, getUserId(req))
+      issue: issuePayload
     });
   } catch (error) {
     console.error('incrementViewCount error:', error);
