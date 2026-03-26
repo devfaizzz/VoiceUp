@@ -173,6 +173,7 @@ function showPage(page, el) {
     'departments': { title: 'Departments', subtitle: 'Manage and organize departments' },
     'analytics': { title: 'Analytics', subtitle: 'Track and analyze issue reports' },
     'reports': { title: 'Reports', subtitle: 'Generate and export detailed reports' },
+    'sentiment': { title: 'Sentiment Analysis', subtitle: 'Review issue mood, negative share, and area trends' },
     'settings': { title: 'Settings', subtitle: 'Configure admin panel preferences' }
   };
   const info = pageTitles[page] || {};
@@ -989,6 +990,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const summaryEl = document.getElementById('sentSummary');
     const topicsEl = document.getElementById('sentTopicsList');
     const misinfoEl = document.getElementById('sentMisinfoList');
+    const negativeEl = document.getElementById('sentNegativePct');
+    const areaEl = document.getElementById('sentAreaList');
 
     if (!scoreEl) return;
     scoreEl.textContent = '...';
@@ -1000,6 +1003,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       scoreEl.textContent = data.overallScore + '/100';
       moodEl.textContent = data.sentiment;
+      if (negativeEl) negativeEl.textContent = (data.negativePercentage ?? 0) + '%';
 
       // Color code mood
       if (data.overallScore >= 70) moodEl.style.color = '#10B981';
@@ -1024,6 +1028,27 @@ document.addEventListener('DOMContentLoaded', () => {
         topicsEl.innerHTML = '<div style="color:#94A3B8;">No trending topics detected.</div>';
       }
 
+      if (areaEl) {
+        areaEl.innerHTML = '';
+        if (data.areaWiseSentiment && data.areaWiseSentiment.length > 0) {
+          data.areaWiseSentiment.forEach(item => {
+            areaEl.innerHTML += `
+              <div style="background:#F8FAFC; padding:12px; border-radius:10px;">
+                <div style="display:flex; justify-content:space-between; gap:12px;">
+                  <strong style="color:#1E293B;">${item.area}</strong>
+                  <span style="color:#DC2626; font-weight:700;">${item.negativePercent}% negative</span>
+                </div>
+                <div style="margin-top:6px; font-size:.88rem; color:#64748B;">
+                  Positive ${item.positivePercent}% • Neutral ${item.neutralPercent}% • Total ${item.total}
+                </div>
+              </div>
+            `;
+          });
+        } else {
+          areaEl.innerHTML = '<div style="color:#94A3B8;">No area-wise sentiment trends available.</div>';
+        }
+      }
+
       // Misinfo
       misinfoEl.innerHTML = '';
       if (data.misinformationFlags && data.misinformationFlags.length > 0) {
@@ -1043,6 +1068,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.error('Sentiment load error', err);
       scoreEl.textContent = 'Error';
+      if (negativeEl) negativeEl.textContent = '--';
       summaryEl.textContent = 'Failed to load AI sentiment data. Please check connection.';
     }
   }
@@ -1739,7 +1765,28 @@ window.openCompletionView = async function (issueId) {
 
       ${proof.notes ? `<div style="margin-top:16px;padding:12px;background:#fffbeb;border-radius:8px;border:1px solid #fde68a;"><div style="font-size:12px;color:#92400e;font-weight:600;">CONTRACTOR NOTES</div><div style="font-size:14px;color:#78350f;margin-top:4px;">${proof.notes}</div></div>` : ''}
 
-      ${bid.status === 'completed' ? `<button onclick="approvePaymentFromView('${bid._id}')" class="btn btn-success" style="width:100%;margin-top:20px;padding:14px;">💰 Approve Payment</button>` : ''}
+      ${bid.status === 'completed' || bid.workProof?.adminReview?.status !== 'verified' ? `
+        <button onclick="verifyWorkFromView('${bid._id}')" class="btn btn-primary" style="width:100%;margin-top:20px;padding:14px;">Verify Work & Forward to Citizen</button>
+      ` : ''}
+
+      <div style="margin-top:18px; padding:16px; border:1px solid #E2E8F0; border-radius:12px;">
+        <h4 style="margin:0 0 12px;">Contractor Rating</h4>
+        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px;">
+          <label style="font-size:12px; color:#64748B;">Quality
+            <input id="rateQuality" type="number" min="1" max="5" value="${bid.rating?.quality || ''}" style="width:100%; margin-top:6px; padding:10px; border:1px solid #CBD5E1; border-radius:8px;">
+          </label>
+          <label style="font-size:12px; color:#64748B;">Time
+            <input id="rateTime" type="number" min="1" max="5" value="${bid.rating?.timeliness || ''}" style="width:100%; margin-top:6px; padding:10px; border:1px solid #CBD5E1; border-radius:8px;">
+          </label>
+          <label style="font-size:12px; color:#64748B;">Cost
+            <input id="rateCost" type="number" min="1" max="5" value="${bid.rating?.cost || ''}" style="width:100%; margin-top:6px; padding:10px; border:1px solid #CBD5E1; border-radius:8px;">
+          </label>
+        </div>
+        <textarea id="rateFeedback" placeholder="Optional rating notes" style="width:100%; margin-top:12px; min-height:90px; padding:12px; border:1px solid #CBD5E1; border-radius:10px;">${bid.rating?.feedback || ''}</textarea>
+        <button onclick="submitContractorRating('${bid._id}')" class="btn btn-success" style="width:100%;margin-top:12px;padding:12px;">Save Rating</button>
+      </div>
+
+      ${bid.status === 'payment_requested' ? `<button onclick="approvePaymentFromView('${bid._id}')" class="btn btn-success" style="width:100%;margin-top:20px;padding:14px;">Approve Payment</button>` : ''}
     `;
   } catch (err) {
     body.innerHTML = `<div style="text-align:center;padding:40px;color:#ef4444;">Error: ${err.message}</div>`;
@@ -1765,6 +1812,44 @@ window.approvePaymentFromView = async function (bidId) {
     } else {
       showAdminToast(data.message || 'Error', 'error');
     }
+  } catch (e) {
+    showAdminToast(e.message, 'error');
+  }
+};
+
+window.verifyWorkFromView = async function (bidId) {
+  try {
+    const res = await fetch(`/api/admin/bid/${bidId}/verify-work`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminAuthHeader() },
+      body: JSON.stringify({ notes: 'Verified from admin completion view' })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Failed to verify work');
+    showAdminToast('Work verified and forwarded to citizen.', 'success');
+    closeCompletionView();
+    if (typeof loadAll === 'function') loadAll();
+  } catch (e) {
+    showAdminToast(e.message, 'error');
+  }
+};
+
+window.submitContractorRating = async function (bidId) {
+  const quality = Number(document.getElementById('rateQuality')?.value);
+  const timeliness = Number(document.getElementById('rateTime')?.value);
+  const cost = Number(document.getElementById('rateCost')?.value);
+  const feedback = document.getElementById('rateFeedback')?.value || '';
+
+  try {
+    const res = await fetch(`/api/admin/bid/${bidId}/rate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminAuthHeader() },
+      body: JSON.stringify({ quality, timeliness, cost, feedback })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Failed to save rating');
+    showAdminToast('Contractor rating saved.', 'success');
+    if (typeof loadAll === 'function') loadAll();
   } catch (e) {
     showAdminToast(e.message, 'error');
   }

@@ -331,9 +331,24 @@ function initImagePreview() {
 // ─── Report Detail Modal ───────────────────────────────────────
 let detailMapInitialized = false;
 let currentReport = null;
+let nearbyIssues = [];
 
-function openDetailModal(issue) {
-  currentReport = issue;
+async function refreshIssueDetails(issueId, { trackView = false } = {}) {
+  const endpoint = trackView ? `/api/issues/${issueId}/view` : `/api/issues/${issueId}`;
+  const method = trackView ? 'POST' : 'GET';
+  const res = await fetch(endpoint, { method, headers: authHeader() });
+  if (!res.ok) throw new Error('Failed to load issue');
+  const data = await res.json();
+  return data.issue || data;
+}
+
+async function openDetailModal(issue) {
+  try {
+    currentReport = await refreshIssueDetails(issue._id, { trackView: true });
+  } catch (e) {
+    currentReport = issue;
+  }
+  issue = currentReport;
   const overlay = document.getElementById('detailModal');
 
   document.getElementById('bcTitle').textContent = issue.title || 'Report Detail';
@@ -357,6 +372,18 @@ function openDetailModal(issue) {
   document.getElementById('mdDate').textContent = fmtDate(issue.createdAt);
   document.getElementById('mdViews').textContent = issue.viewCount || issue.views || '—';
   document.getElementById('mdLikes').textContent = (issue.upvotes && issue.upvotes.length) || issue.upvotesCount || '—';
+  const upvoteBtn = document.getElementById('detailUpvoteBtn');
+  const upvoteNote = document.getElementById('detailUpvoteNote');
+  if (upvoteBtn) {
+    const hasUpvoted = !!issue.hasUpvoted;
+    upvoteBtn.disabled = hasUpvoted;
+    upvoteBtn.textContent = hasUpvoted ? 'Already Upvoted' : 'Upvote This Issue';
+  }
+  if (upvoteNote) {
+    upvoteNote.textContent = issue.hasUpvoted
+      ? 'Your upvote is already counted.'
+      : 'One upvote per citizen.';
+  }
 
   const pts = issue.voiceCoins || issue.voicePoints || 35;
   document.getElementById('mdPoints').textContent = pts;
@@ -397,6 +424,18 @@ function openDetailModal(issue) {
   const rc = document.getElementById('reminderCard');
   // Make reminder visible for pending/rejected issues (removed 24h limit)
   rc.style.display = (!isResolved) ? 'flex' : 'none';
+
+  const citizenVerificationCard = document.getElementById('citizenVerificationCard');
+  const citizenVerificationText = document.getElementById('citizenVerificationText');
+  const currentUserId = currentUserData?.user?._id || getUser()?.id;
+  const isReporter = issue.reportedBy && String(issue.reportedBy) === String(currentUserId);
+  const canRespond = isReporter && issue.citizenFeedback && issue.citizenFeedback.status === 'pending';
+  if (citizenVerificationCard) {
+    citizenVerificationCard.style.display = canRespond ? 'flex' : 'none';
+    if (citizenVerificationText && canRespond) {
+      citizenVerificationText.textContent = 'Admin verified the submitted work. Please confirm if you are satisfied.';
+    }
+  }
 
   // Mini map header — show location name
   document.getElementById('mdMapName').textContent = addr.split(',')[0] || 'Location';
@@ -553,12 +592,50 @@ async function loadMyReports() {
   }
 }
 
-function renderReportsList(issues, containerStrOrEl = 'reportsList', limit = null) {
+async function loadNearbyIssues() {
+  const list = document.getElementById('nearbyIssuesList');
+  if (!list) return;
+
+  list.innerHTML = '<p style="text-align:center;color:#A78BFA;font-size:.85rem;padding:20px 0;">Fetching nearby issues...</p>';
+
+  if (!navigator.geolocation) {
+    list.innerHTML = '<p style="text-align:center;color:#A78BFA;font-size:.85rem;padding:20px 0;">Geolocation is not supported on this device.</p>';
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(async (position) => {
+    try {
+      const radius = 5000;
+      const res = await fetch(`/api/issues/nearby?latitude=${position.coords.latitude}&longitude=${position.coords.longitude}&radius=${radius}`, {
+        headers: authHeader()
+      });
+
+      if (!res.ok) throw new Error('Failed to fetch nearby issues');
+      const data = await res.json();
+      nearbyIssues = data.issues || [];
+
+      const radiusLabel = document.getElementById('nearbyRadiusLabel');
+      if (radiusLabel) radiusLabel.textContent = `Radius: ${Math.round((data.radius || radius) / 1000)} km`;
+
+      renderReportsList(nearbyIssues, list, 6, { includeDistance: true, emptyMessage: 'No nearby issues found yet.' });
+    } catch (error) {
+      console.error('Error loading nearby issues:', error);
+      list.innerHTML = '<p style="text-align:center;color:#A78BFA;font-size:.85rem;padding:20px 0;">Unable to load nearby issues right now.</p>';
+    }
+  }, () => {
+    list.innerHTML = '<p style="text-align:center;color:#A78BFA;font-size:.85rem;padding:20px 0;">Allow location access to see nearby issues.</p>';
+  }, {
+    enableHighAccuracy: true,
+    timeout: 10000
+  });
+}
+
+function renderReportsList(issues, containerStrOrEl = 'reportsList', limit = null, options = {}) {
   const container = typeof containerStrOrEl === 'string' ? document.getElementById(containerStrOrEl) : containerStrOrEl;
   if (!container) return;
   container.innerHTML = '';
   if (!issues || !issues.length) {
-    container.innerHTML = '<p style="text-align:center;color:#A78BFA;font-size:.85rem;padding:20px 0;">No reports yet. Submit your first report!</p>';
+    container.innerHTML = `<p style="text-align:center;color:#A78BFA;font-size:.85rem;padding:20px 0;">${options.emptyMessage || 'No reports yet. Submit your first report!'}</p>`;
     return;
   }
 
@@ -582,6 +659,11 @@ function renderReportsList(issues, containerStrOrEl = 'reportsList', limit = nul
           <span class="prio-dot ${issue.priority}"></span>
           <span class="prio-label">${issue.priority ? issue.priority.charAt(0).toUpperCase() + issue.priority.slice(1) : 'Medium'}</span>
         </div>
+        <div class="report-stats">
+          <span>↑ ${issue.upvoteCount || issue.upvotes?.length || 0}</span>
+          <span>👁 ${issue.viewCount || 0}</span>
+          ${options.includeDistance && issue.distance ? `<span>📍 ${issue.distance}m</span>` : ''}
+        </div>
         <div class="progress-bar"><div class="progress-fill" style="width:${prog}%"></div></div>
       </div>
       <span class="status-badge ${st === 'in_progress' ? 'in-progress' : st}">${stLabel}</span>
@@ -590,6 +672,62 @@ function renderReportsList(issues, containerStrOrEl = 'reportsList', limit = nul
     div.addEventListener('click', () => openDetailModal(issue));
     container.appendChild(div);
   });
+}
+
+async function handleDetailUpvote() {
+  if (!currentReport) return;
+  const btn = document.getElementById('detailUpvoteBtn');
+  const note = document.getElementById('detailUpvoteNote');
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/issues/${currentReport._id}/upvote`, {
+      method: 'POST',
+      headers: authHeader()
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Failed to upvote');
+    currentReport = data.issue || currentReport;
+    document.getElementById('mdLikes').textContent = currentReport.upvoteCount || currentReport.upvotes?.length || 0;
+    btn.textContent = 'Already Upvoted';
+    note.textContent = 'Your upvote is already counted.';
+    showToast('Upvote recorded successfully!', 'success');
+    loadNearbyIssues();
+    loadMyReports();
+  } catch (error) {
+    btn.disabled = false;
+    showToast(error.message || 'Unable to upvote right now.', 'error');
+  }
+}
+
+async function submitCitizenVerification(decision) {
+  if (!currentReport) return;
+  const satisfiedBtn = document.getElementById('citizenSatisfiedBtn');
+  const notSatisfiedBtn = document.getElementById('citizenNotSatisfiedBtn');
+  satisfiedBtn.disabled = true;
+  notSatisfiedBtn.disabled = true;
+  try {
+    const res = await fetch(`/api/issues/${currentReport._id}/citizen-response`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeader() },
+      body: JSON.stringify({ decision })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Failed to submit response');
+    currentReport = data.issue || currentReport;
+    showToast(
+      decision === 'satisfied'
+        ? 'Issue closed and reward credited.'
+        : 'Issue reopened for another review cycle.',
+      'success'
+    );
+    openDetailModal(currentReport);
+    loadMyReports();
+  } catch (error) {
+    showToast(error.message || 'Could not submit your response.', 'error');
+  } finally {
+    satisfiedBtn.disabled = false;
+    notSatisfiedBtn.disabled = false;
+  }
 }
 
 // ─── Notifications ─────────────────────────────────────────────
@@ -720,6 +858,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.target === document.getElementById('detailModal')) closeDetailModal();
   });
   document.getElementById('bcHome')?.addEventListener('click', closeDetailModal);
+  document.getElementById('detailUpvoteBtn')?.addEventListener('click', handleDetailUpvote);
+  document.getElementById('citizenSatisfiedBtn')?.addEventListener('click', () => submitCitizenVerification('satisfied'));
+  document.getElementById('citizenNotSatisfiedBtn')?.addEventListener('click', () => submitCitizenVerification('not_satisfied'));
 
   // All Reports modal
   document.getElementById('viewAllReportsBtn')?.addEventListener('click', () => {
@@ -971,5 +1112,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Load everything
   loadUserData();
   loadMyReports();
+  loadNearbyIssues();
   loadNotifications();
 });

@@ -594,7 +594,19 @@ body::after {
     overflow-y: auto;
 }
 
+.nearby-issues-card {
+    padding: 22px;
+    margin-top: 18px;
+    max-height: 420px;
+    overflow-y: auto;
+}
+
 #reportsList {
+    display: flex;
+    flex-direction: column;
+}
+
+#nearbyIssuesList {
     display: flex;
     flex-direction: column;
 }
@@ -624,6 +636,12 @@ body::after {
     text-decoration: underline;
 }
 
+.section-meta {
+    font-size: .76rem;
+    color: #8B5CF6;
+    font-weight: 600;
+}
+
 .report-item {
     display: flex;
     align-items: center;
@@ -643,6 +661,14 @@ body::after {
 
 .report-item:hover {
     background: rgba(139, 92, 246, 0.06);
+}
+
+.report-item .report-stats {
+    display: flex;
+    gap: 10px;
+    margin-top: 6px;
+    font-size: .72rem;
+    color: #7C3AED;
 }
 
 .report-icon {
@@ -697,6 +723,76 @@ body::after {
     align-items: center;
     gap: 6px;
     margin-top: 4px;
+}
+
+.detail-actions-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.detail-upvote-btn {
+    border: none;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #7C3AED, #A855F7);
+    color: #fff;
+    padding: 10px 16px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 10px 20px rgba(124, 58, 237, 0.18);
+}
+
+.detail-upvote-btn[disabled] {
+    opacity: .65;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.detail-action-note {
+    font-size: .78rem;
+    color: #8B5CF6;
+}
+
+.verification-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 16px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: #F8FAFF;
+    border: 1px solid rgba(124, 58, 237, 0.14);
+}
+
+.verification-card p {
+    flex: 1;
+    margin: 0;
+    color: #4338CA;
+    font-size: .88rem;
+}
+
+.verification-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.verification-btn {
+    border: none;
+    border-radius: 999px;
+    padding: 9px 14px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.verification-btn.success {
+    background: #10B981;
+    color: #fff;
+}
+
+.verification-btn.danger {
+    background: #EF4444;
+    color: #fff;
 }
 
 .prio-dot {

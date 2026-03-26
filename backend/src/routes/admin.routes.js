@@ -526,15 +526,74 @@ router.post('/bid/:bidId/approve-payment', async (req, res) => {
   }
 });
 
+// Verify submitted work and forward it to the reporting citizen
+router.post('/bid/:bidId/verify-work', async (req, res) => {
+  try {
+    const { notes } = req.body;
+
+    const bid = await Bid.findById(req.params.bidId)
+      .populate('contractor', 'name')
+      .populate('issue');
+
+    if (!bid) {
+      return res.status(404).json({ success: false, message: 'Bid not found' });
+    }
+
+    if (!bid.workProof?.afterImages?.length) {
+      return res.status(400).json({ success: false, message: 'No submitted work proof found' });
+    }
+
+    bid.workProof.adminReview = {
+      status: 'verified',
+      verifiedAt: new Date(),
+      verifiedBy: req.user._id,
+      notes: notes || 'Verified by admin'
+    };
+    await bid.save();
+
+    const issue = await Issue.findById(bid.issue._id);
+    if (issue) {
+      issue.contractorAssignment.status = 'payment_pending';
+      issue.contractorAssignment.adminVerifiedAt = new Date();
+      issue.contractorAssignment.adminVerifiedBy = req.user._id;
+      issue.citizenFeedback = {
+        status: 'pending',
+        forwardedAt: new Date(),
+        comment: notes || '',
+        rewardCoins: issue.citizenFeedback?.rewardCoins || 0
+      };
+      await issue.save();
+
+      if (issue.reportedBy && req.app.get('io')) {
+        req.app.get('io').to(`user-${issue.reportedBy}`).emit('issue:status', {
+          id: issue._id,
+          status: 'awaiting_citizen_confirmation',
+          coinsAwarded: 0
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: 'Work verified and forwarded to citizen',
+      bid
+    });
+  } catch (error) {
+    console.error('Verify work error:', error);
+    return res.status(500).json({ success: false, message: 'Error verifying work', error: error.message });
+  }
+});
+
 // Rate contractor after work completion
 router.post('/bid/:bidId/rate', async (req, res) => {
   try {
-    const { rating, feedback } = req.body;
+    const { quality, timeliness, cost, feedback } = req.body;
+    const scores = [quality, timeliness, cost].map(Number);
 
-    if (!rating || rating < 1 || rating > 5) {
+    if (scores.some(score => !score || score < 1 || score > 5)) {
       return res.status(400).json({
         success: false,
-        message: 'Rating must be between 1 and 5'
+        message: 'Quality, timeliness, and cost ratings must be between 1 and 5'
       });
     }
 
@@ -555,9 +614,14 @@ router.post('/bid/:bidId/rate', async (req, res) => {
       });
     }
 
+    const averageScore = Math.round(((scores[0] + scores[1] + scores[2]) / 3) * 10) / 10;
+
     // Update bid rating
     bid.rating = {
-      score: rating,
+      score: averageScore,
+      quality: scores[0],
+      timeliness: scores[1],
+      cost: scores[2],
       feedback,
       ratedAt: new Date(),
       ratedBy: req.user._id
@@ -565,7 +629,11 @@ router.post('/bid/:bidId/rate', async (req, res) => {
     await bid.save();
 
     // Update contractor's average rating
-    await bid.contractor.updateRating(rating);
+    await bid.contractor.updateRating({
+      quality: scores[0],
+      timeliness: scores[1],
+      cost: scores[2]
+    });
 
     // Update past project with rating
     const contractor = await Contractor.findById(bid.contractor._id);
@@ -573,7 +641,7 @@ router.post('/bid/:bidId/rate', async (req, res) => {
       p => p.bidId?.toString() === bid._id.toString()
     );
     if (projectIndex !== -1) {
-      contractor.pastProjects[projectIndex].rating = rating;
+      contractor.pastProjects[projectIndex].rating = averageScore;
       contractor.pastProjects[projectIndex].feedback = feedback;
       await contractor.save();
     }

@@ -79,7 +79,23 @@ const contractorSchema = new mongoose.Schema({
       type: Number,
       default: 0
     },
+    averageQualityRating: {
+      type: Number,
+      default: 0
+    },
+    averageTimeRating: {
+      type: Number,
+      default: 0
+    },
+    averageCostRating: {
+      type: Number,
+      default: 0
+    },
     totalRatings: {
+      type: Number,
+      default: 0
+    },
+    efficiencyScore: {
       type: Number,
       default: 0
     }
@@ -171,14 +187,34 @@ contractorSchema.methods.resetLoginAttempts = function() {
 
 // Update rating after project completion
 contractorSchema.methods.updateRating = function(newRating) {
+  const overall = typeof newRating === 'number'
+    ? newRating
+    : Math.round((((newRating.quality || 0) + (newRating.timeliness || 0) + (newRating.cost || 0)) / 3) * 10) / 10;
+
   const totalRatings = this.statistics.totalRatings;
   const currentAvg = this.statistics.averageRating;
   
   const newTotal = totalRatings + 1;
-  const newAvg = ((currentAvg * totalRatings) + newRating) / newTotal;
+  const newAvg = ((currentAvg * totalRatings) + overall) / newTotal;
   
   this.statistics.averageRating = Math.round(newAvg * 10) / 10;
   this.statistics.totalRatings = newTotal;
+
+  if (typeof newRating === 'object') {
+    const currentQuality = this.statistics.averageQualityRating || 0;
+    const currentTime = this.statistics.averageTimeRating || 0;
+    const currentCost = this.statistics.averageCostRating || 0;
+
+    this.statistics.averageQualityRating = Math.round((((currentQuality * totalRatings) + (newRating.quality || overall)) / newTotal) * 10) / 10;
+    this.statistics.averageTimeRating = Math.round((((currentTime * totalRatings) + (newRating.timeliness || overall)) / newTotal) * 10) / 10;
+    this.statistics.averageCostRating = Math.round((((currentCost * totalRatings) + (newRating.cost || overall)) / newTotal) * 10) / 10;
+  }
+
+  const acceptedBids = this.statistics.acceptedBids || 0;
+  const completedProjects = this.statistics.completedProjects || 0;
+  this.statistics.efficiencyScore = acceptedBids > 0
+    ? Math.round((completedProjects / acceptedBids) * 100)
+    : 0;
   
   return this.save();
 };

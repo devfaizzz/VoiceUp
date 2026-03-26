@@ -616,6 +616,54 @@
                 </div>
             </div>
 
+            <div id="page-sentiment" class="page-section">
+                <div style="display:grid; grid-template-columns: 1.1fr .9fr; gap: 20px;">
+                    <div class="glass-card">
+                        <div class="card-header"><h3>Issue Sentiment Overview</h3></div>
+                        <div class="card-body">
+                            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px;">
+                                <div style="background:#F8FAFC; border-radius:14px; padding:18px;">
+                                    <div style="font-size:.82rem; color:#64748B; font-weight:600;">Overall Score</div>
+                                    <div id="sentScore" style="font-size:2rem; font-weight:800; color:#1E293B; margin-top:8px;">--</div>
+                                </div>
+                                <div style="background:#F8FAFC; border-radius:14px; padding:18px;">
+                                    <div style="font-size:.82rem; color:#64748B; font-weight:600;">Detected Mood</div>
+                                    <div id="sentMood" style="font-size:1.3rem; font-weight:800; color:#1E293B; margin-top:10px;">--</div>
+                                </div>
+                                <div style="background:#FEF2F2; border-radius:14px; padding:18px;">
+                                    <div style="font-size:.82rem; color:#64748B; font-weight:600;">Negative Issues</div>
+                                    <div id="sentNegativePct" style="font-size:2rem; font-weight:800; color:#DC2626; margin-top:8px;">--</div>
+                                </div>
+                            </div>
+                            <p id="sentSummary" style="color:#475569; line-height:1.6; margin-bottom:18px;">Loading sentiment summary...</p>
+                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                                <div>
+                                    <h4 style="margin:0 0 12px; color:#1E293B;">Distribution</h4>
+                                    <div id="sentTopicsList" style="display:flex; flex-direction:column; gap:10px;"></div>
+                                </div>
+                                <div>
+                                    <h4 style="margin:0 0 12px; color:#1E293B;">Area-wise Trends</h4>
+                                    <div id="sentAreaList" style="display:flex; flex-direction:column; gap:10px;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="glass-card">
+                        <div class="card-header"><h3>Risk Signals</h3></div>
+                        <div class="card-body">
+                            <div id="sentMisinfoList" style="display:flex; flex-direction:column; gap:10px; margin-bottom:18px;"></div>
+                            <div style="background:#EFF6FF; border-radius:14px; padding:16px;">
+                                <div style="font-size:.82rem; color:#475569; font-weight:700; margin-bottom:8px;">How this works</div>
+                                <p style="margin:0; color:#64748B; line-height:1.6; font-size:.92rem;">
+                                    Sentiment is classified at issue submission time as Positive, Neutral, or Negative. These metrics aggregate recent issues to highlight negative share and area-level trends for the admin team.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- ============ SETTINGS PAGE ============ -->
             <div id="page-settings" class="page-section">
                 <div class="glass-card">

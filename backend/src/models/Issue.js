@@ -27,6 +27,11 @@ const issueSchema = new mongoose.Schema({
     default: 'medium',
     enum: ['low', 'medium', 'high', 'critical']
   },
+  basePriority: {
+    type: String,
+    default: 'medium',
+    enum: ['low', 'medium', 'high', 'critical']
+  },
   location: {
     type: {
       type: String,
@@ -74,7 +79,20 @@ const issueSchema = new mongoose.Schema({
     category: String,
     confidence: Number,
     suggestedPriority: String,
+    reason: String,
     processedAt: Date
+  },
+  sentiment: {
+    label: {
+      type: String,
+      enum: ['Positive', 'Neutral', 'Negative'],
+      default: 'Neutral'
+    },
+    score: {
+      type: Number,
+      default: 0
+    },
+    analyzedAt: Date
   },
   timeline: [{
     status: String,
@@ -122,6 +140,10 @@ const issueSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  upvoteCount: {
+    type: Number,
+    default: 0
+  },
   upvotes: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
@@ -165,7 +187,26 @@ const issueSchema = new mongoose.Schema({
     },
     acceptedAt: Date,
     completedAt: Date,
-    paidAt: Date
+    paidAt: Date,
+    adminVerifiedAt: Date,
+    adminVerifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }
+  },
+  citizenFeedback: {
+    status: {
+      type: String,
+      enum: ['none', 'pending', 'satisfied', 'not_satisfied'],
+      default: 'none'
+    },
+    forwardedAt: Date,
+    respondedAt: Date,
+    comment: String,
+    rewardCoins: {
+      type: Number,
+      default: 0
+    }
   }
 }, {
   timestamps: true,
@@ -233,6 +274,7 @@ issueSchema.methods.toggleUpvote = function(userId) {
   } else {
     this.upvotes.push(userId);
   }
+  this.upvoteCount = this.upvotes.length;
   return this.save();
 };
 

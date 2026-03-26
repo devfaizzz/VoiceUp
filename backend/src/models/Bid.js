@@ -72,7 +72,21 @@ const bidSchema = new mongoose.Schema({
       },
       coordinates: [Number]
     },
-    notes: String
+    notes: String,
+    distanceFromIssue: Number,
+    adminReview: {
+      status: {
+        type: String,
+        enum: ['pending', 'verified', 'rejected'],
+        default: 'pending'
+      },
+      verifiedAt: Date,
+      verifiedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      },
+      notes: String
+    }
   },
   paymentRequest: {
     requestedAt: Date,
@@ -106,6 +120,21 @@ const bidSchema = new mongoose.Schema({
   }],
   rating: {
     score: {
+      type: Number,
+      min: 1,
+      max: 5
+    },
+    quality: {
+      type: Number,
+      min: 1,
+      max: 5
+    },
+    timeliness: {
+      type: Number,
+      min: 1,
+      max: 5
+    },
+    cost: {
       type: Number,
       min: 1,
       max: 5
