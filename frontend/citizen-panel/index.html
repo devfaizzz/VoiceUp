@@ -516,5 +516,280 @@ if('serviceWorker' in navigator){
 }
 </script>
 
+<!-- ══════════ CHATBOT WIDGET ══════════ -->
+
+<!-- Floating Action Button -->
+<button class="chatbot-fab" id="chatbotFab" title="VoiceUp Assistant">
+  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+    <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
+    <circle cx="8" cy="10" r="1.2"/>
+    <circle cx="12" cy="10" r="1.2"/>
+    <circle cx="16" cy="10" r="1.2"/>
+  </svg>
+  <span class="chatbot-fab-badge" id="chatbotBadge" style="display:none;">1</span>
+</button>
+
+<!-- Chat Window -->
+<div class="chatbot-window" id="chatbotWindow">
+
+  <!-- Header -->
+  <div class="chatbot-header">
+    <div class="chatbot-avatar">🤖</div>
+    <div class="chatbot-header-info">
+      <div class="chatbot-header-name">ChatUp AI Assistant</div>
+      <div class="chatbot-header-status">
+        <span class="chatbot-status-dot"></span>
+        AI-Powered · Always Online
+      </div>
+    </div>
+    <button class="chatbot-close" id="chatbotClose" title="Close">✕</button>
+  </div>
+
+  <!-- Suggestion Chips -->
+  <div class="chatbot-suggestions" id="chatbotSuggestions"></div>
+
+  <!-- Messages Area -->
+  <div class="chatbot-messages" id="chatbotMessages">
+    <!-- Welcome message injected by JS -->
+  </div>
+
+  <!-- Typing Indicator -->
+  <div class="chatbot-typing" id="chatbotTyping" style="display:none;">
+    <div class="chatbot-typing-dots">
+      <span></span><span></span><span></span>
+    </div>
+  </div>
+
+  <!-- Input Area -->
+  <div class="chatbot-input-area">
+    <div class="chatbot-input-wrap">
+      <input type="text" class="chatbot-input" id="chatbotInput" placeholder="Type your question…" autocomplete="off" maxlength="500">
+    </div>
+    <button class="chatbot-send-btn" id="chatbotSendBtn" title="Send">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="22" y1="2" x2="11" y2="13"/>
+        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Powered By -->
+  <div class="chatbot-powered">Powered by Llama 3.3 70B · VoiceUp AI</div>
+</div>
+
+<!-- Chatbot Script -->
+<script>
+(function() {
+  'use strict';
+
+  // ── Elements ──
+  const fab = document.getElementById('chatbotFab');
+  const win = document.getElementById('chatbotWindow');
+  const closeBtn = document.getElementById('chatbotClose');
+  const messagesEl = document.getElementById('chatbotMessages');
+  const inputEl = document.getElementById('chatbotInput');
+  const sendBtn = document.getElementById('chatbotSendBtn');
+  const typingEl = document.getElementById('chatbotTyping');
+  const suggestionsEl = document.getElementById('chatbotSuggestions');
+  const badge = document.getElementById('chatbotBadge');
+
+  // ── State ──
+  let isOpen = false;
+  let isLoading = false;
+  let chatHistory = []; // { role, content }
+  let hasGreeted = false;
+
+  // ── Toggle chat ──
+  function toggleChat() {
+    isOpen = !isOpen;
+    win.classList.toggle('open', isOpen);
+    fab.classList.toggle('open', isOpen);
+    badge.style.display = 'none';
+
+    if (isOpen && !hasGreeted) {
+      hasGreeted = true;
+      addBotMessage(getWelcomeMessage());
+      loadSuggestions();
+    }
+
+    if (isOpen) {
+      setTimeout(() => inputEl.focus(), 350);
+    }
+  }
+
+  fab.addEventListener('click', toggleChat);
+  closeBtn.addEventListener('click', toggleChat);
+
+  // Show badge after 3 seconds
+  setTimeout(() => {
+    if (!isOpen) {
+      badge.style.display = 'flex';
+    }
+  }, 3000);
+
+  // ── Welcome Message ──
+  function getWelcomeMessage() {
+    const u = typeof getUser === 'function' ? getUser() : null;
+    const name = u ? u.name?.split(' ')[0] : '';
+    return `Namaste${name ? ' ' + name : ''}! 🙏\n\nMain **ChatUp Assistant** hoon — aapka AI helper! 🤖\n\nMujhse poochiye kuch bhi VoiceUp ke baare mein:\n• Report kaise kare?\n• Apni complaint track kaise kare?\n• Voice Coins kaise earn kare?\n• Koi bhi feature kaise use kare?\n\nBataiye, main kaise madad kar sakta hoon? 😊`;
+  }
+
+  // ── Load suggestions ──
+  async function loadSuggestions() {
+    try {
+      const res = await fetch('/api/chatbot/suggestions');
+      if (!res.ok) return;
+      const data = await res.json();
+      renderSuggestions(data.suggestions || []);
+    } catch {
+      // Fallback suggestions
+      renderSuggestions([
+        { text: '📝 Report kaise kare?', query: 'Report kaise submit karu?' },
+        { text: '📊 Track my report', query: 'Meri complaint ka status kaise dekhu?' },
+        { text: '🎙️ Voice se report', query: 'Voice se report kaise karu?' },
+        { text: '🪙 Voice Coins', query: 'Voice Coins kya hain?' },
+      ]);
+    }
+  }
+
+  function renderSuggestions(suggestions) {
+    suggestionsEl.innerHTML = '';
+    suggestions.forEach(s => {
+      const chip = document.createElement('button');
+      chip.className = 'chatbot-suggestion-chip';
+      chip.textContent = s.text;
+      chip.addEventListener('click', () => {
+        sendMessage(s.query);
+        suggestionsEl.style.display = 'none';
+      });
+      suggestionsEl.appendChild(chip);
+    });
+  }
+
+  // ── Send Message ──
+  async function sendMessage(text) {
+    const msg = (text || inputEl.value).trim();
+    if (!msg || isLoading) return;
+
+    inputEl.value = '';
+    addUserMessage(msg);
+    chatHistory.push({ role: 'user', content: msg });
+
+    isLoading = true;
+    sendBtn.disabled = true;
+    typingEl.style.display = 'flex';
+    scrollToBottom();
+
+    try {
+      const res = await fetch('/api/chatbot/message', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(typeof authHeader === 'function' ? authHeader() : {})
+        },
+        body: JSON.stringify({ message: msg, history: chatHistory.slice(-20) })
+      });
+
+      const data = await res.json();
+      const reply = data.reply || 'Sorry, please try again.';
+      
+      chatHistory.push({ role: 'assistant', content: reply });
+      addBotMessage(reply);
+
+    } catch (err) {
+      addBotMessage('Network error. Please check your connection and try again. 🙏');
+    } finally {
+      isLoading = false;
+      sendBtn.disabled = false;
+      typingEl.style.display = 'none';
+      scrollToBottom();
+    }
+  }
+
+  // ── Send button & Enter key ──
+  sendBtn.addEventListener('click', () => sendMessage());
+  inputEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  // ── Render Messages ──
+  function addUserMessage(text) {
+    const userInitial = (() => {
+      const u = typeof getUser === 'function' ? getUser() : null;
+      return u && u.name ? u.name.charAt(0).toUpperCase() : 'U';
+    })();
+
+    const div = document.createElement('div');
+    div.className = 'chatbot-msg user';
+    div.innerHTML = `
+      <div class="chatbot-msg-avatar">${userInitial}</div>
+      <div>
+        <div class="chatbot-msg-bubble">${escapeHtml(text)}</div>
+        <div class="chatbot-msg-time">${formatTime()}</div>
+      </div>
+    `;
+    messagesEl.appendChild(div);
+    scrollToBottom();
+  }
+
+  function addBotMessage(text) {
+    const div = document.createElement('div');
+    div.className = 'chatbot-msg bot';
+    div.innerHTML = `
+      <div class="chatbot-msg-avatar">🤖</div>
+      <div>
+        <div class="chatbot-msg-bubble">${formatBotText(text)}</div>
+        <div class="chatbot-msg-time">${formatTime()}</div>
+      </div>
+    `;
+    messagesEl.appendChild(div);
+    scrollToBottom();
+  }
+
+  // ── Format bot response (simple markdown-ish) ──
+  function formatBotText(text) {
+    return text
+      // Bold: **text**
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      // Italic: *text*
+      .replace(/(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
+      // Bullet points
+      .replace(/^[•\-]\s+/gm, '• ')
+      // Numbered lists
+      .replace(/^(\d+)\.\s+/gm, '$1. ')
+      // Newlines to <br>
+      .replace(/\n/g, '<br>');
+  }
+
+  function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.textContent = text;
+    return d.innerHTML;
+  }
+
+  function formatTime() {
+    const now = new Date();
+    return now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  }
+
+  function scrollToBottom() {
+    requestAnimationFrame(() => {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    });
+  }
+
+// Close on outside click
+  document.addEventListener('click', e => {
+    if (isOpen && !win.contains(e.target) && !fab.contains(e.target)) {
+      toggleChat();
+    }
+  });
+
+})();
+</script>
+
 </body>
 </html>
