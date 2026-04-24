@@ -6,6 +6,7 @@ const classifier = require('../ai/classificationService');
 const sentimentService = require('../ai/sentimentService');
 const { calculateDistance, isValidCoordinates } = require('../utils/locationUtils');
 const { calculatePriority, normalizePriority } = require('../utils/issuePriority');
+const { sendStatusEmail } = require('../utils/emailService');
 
 const COIN_REWARDS = {
   new: 50,
@@ -231,6 +232,15 @@ const createIssue = async (req, res) => {
         message: `coins:new:+${COIN_REWARDS.new}`
       }];
       await issue.save();
+      
+      try {
+        const citizen = await User.findById(userId);
+        if (citizen && citizen.email) {
+          sendStatusEmail(citizen.email, citizen.name, issue.title, 'submitted');
+        }
+      } catch (err) {
+        console.error('Error fetching citizen for submission email:', err);
+      }
     }
 
     req.app.get('io').emit('issue:new', {
@@ -404,6 +414,15 @@ const updateIssueStatus = async (req, res) => {
           $inc: { 'statistics.resolvedReports': 1 }
         });
       }
+      
+      try {
+        const citizen = await User.findById(issue.reportedBy);
+        if (citizen && citizen.email) {
+          sendStatusEmail(citizen.email, citizen.name, issue.title, status);
+        }
+      } catch (err) {
+        console.error('Error fetching citizen for email notification:', err);
+      }
     }
 
     await issue.save();
@@ -512,6 +531,15 @@ const resolveIssue = async (req, res) => {
       await User.findByIdAndUpdate(issue.reportedBy, {
         $inc: { 'statistics.resolvedReports': 1 }
       });
+      
+      try {
+        const citizen = await User.findById(issue.reportedBy);
+        if (citizen && citizen.email) {
+          sendStatusEmail(citizen.email, citizen.name, issue.title, 'resolved');
+        }
+      } catch (err) {
+        console.error('Error fetching citizen for email notification:', err);
+      }
     }
 
     await issue.save();
