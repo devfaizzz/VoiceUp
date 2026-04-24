@@ -22,6 +22,7 @@ const sentimentRoutes = require('./routes/sentiment.routes');
 const communicationRoutes = require('./routes/communication.routes');
 const contractorAuthRoutes = require('./routes/contractor.auth.routes');
 const contractorRoutes = require('./routes/contractor.routes');
+const chatbotRoutes = require('./routes/chatbot.routes');
 
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
@@ -188,6 +189,7 @@ app.use('/api/sentiment', sentimentRoutes);
 app.use('/api/communications', communicationRoutes);
 app.use('/api/contractor/auth', contractorAuthRoutes);
 app.use('/api/contractor', contractorRoutes);
+app.use('/api/chatbot', chatbotRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
