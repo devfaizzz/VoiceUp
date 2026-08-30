@@ -76,7 +76,7 @@ const authenticateContractor = async (req, res, next) => {
 // Get available issues for bidding (sent to contractors)
 router.get('/available-issues', authenticateContractor, async (req, res) => {
   try {
-    const { page = 1, limit = 10 } = req.query;
+    const { page = 1, limit = 50 } = req.query;
 
     const query = {
       $or: [
@@ -85,9 +85,10 @@ router.get('/available-issues', authenticateContractor, async (req, res) => {
       ]
     };
 
-    // Find issues that have been sent to contractors or are newly approved
+    // Newest first — sorting by sentAt buries approved citizen issues that have no sentAt yet
+    // (they sort last), and the contractor panel has no pagination UI beyond the first page.
     const issues = await Issue.find(query)
-      .sort({ 'contractorAssignment.sentAt': -1 })
+      .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(parseInt(limit))
       .select('title description category priority location images createdAt contractorAssignment');

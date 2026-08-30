@@ -17,7 +17,7 @@ class ClassificationService {
       return;
     }
     this.groq = new Groq({ apiKey });
-    logger.info('AI Classification Service initialized (Groq — Llama 3.2 Vision)');
+    logger.info('AI Classification Service initialized (Groq)');
   }
 
   /**
@@ -71,7 +71,7 @@ class ClassificationService {
   }
 
   /**
-   * Analyze image with Groq Vision (Llama 3.2 90B Vision)
+   * Analyze image with Groq Vision
    */
   async analyzeImage(imageBuffer, title, description, category) {
     const base64Image = imageBuffer.toString('base64');
@@ -92,7 +92,7 @@ Respond ONLY with valid JSON, no markdown:
 {"severity": <number 1-10>, "reason": "<one short sentence>"}`;
 
     const chatCompletion = await this.groq.chat.completions.create({
-      model: 'llama-3.2-11b-vision-preview',
+      model: 'qwen/qwen3.6-27b',
       messages: [
         {
           role: 'user',
@@ -108,7 +108,8 @@ Respond ONLY with valid JSON, no markdown:
         }
       ],
       temperature: 0.3,
-      max_tokens: 200
+      max_tokens: 200,
+      reasoning_effort: 'none'
     });
 
     const text = chatCompletion.choices[0]?.message?.content?.trim() || '';
@@ -148,7 +149,7 @@ Respond ONLY with valid JSON:
 {"severity": <number>, "reason": "<one sentence>"}`;
 
       const completion = await this.groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
+        model: 'openai/gpt-oss-120b',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
         max_tokens: 150
@@ -287,7 +288,7 @@ Respond ONLY with valid JSON, no markdown formatting:
       // but for simplicity and speed on structure extraction, we use text.
 
       const completion = await this.groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
+        model: 'openai/gpt-oss-120b',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.2,
         max_tokens: 250
